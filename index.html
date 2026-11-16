@@ -1,0 +1,152 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8" />
+    <link rel="icon" type="image/png" href="/pwa-192x192.png" />
+    <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="theme-color" content="#2E4F35" />
+    <meta name="mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+    <meta name="apple-mobile-web-app-title" content="Feria Canva" />
+    <title>6ta Feria Latinoamérica Territorio Canva · Edición Navideña</title>
+    <meta name="description" content="9 talleres para crear productos navideños en Canva y tenerlos listos para uso personal, regalos o vender esta temporada. Del 23 al 27 de noviembre de 2026." />
+    <meta property="og:title" content="6ta Feria Latinoamérica Territorio Canva · Edición Navideña" />
+    <meta property="og:description" content="9 talleres navideños con 8 colaboradores de Latinoamérica. Del 23 al 27 de noviembre de 2026." />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=Montserrat:wght@400;500;600;700;800&family=Playfair+Display:ital,wght@0,600;0,700;1,600;1,700&display=swap" rel="stylesheet" />
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        @keyframes fall {
+            0% { transform: translateY(-10vh) rotate(0deg); opacity: 1; }
+            100% { transform: translateY(100vh) rotate(720deg); opacity: 0; }
+        }
+        @keyframes snowfall {
+            0% { transform: translate3d(0, -12vh, 0) rotate(0deg); }
+            50% { transform: translate3d(16px, 48vh, 0) rotate(180deg); }
+            100% { transform: translate3d(-10px, 108vh, 0) rotate(360deg); }
+        }
+        @keyframes christmas-twinkle {
+            0%, 100% {
+                opacity: 1;
+                transform: scale(1);
+                box-shadow: 0 0 8px 2px currentColor, 0 2px 14px 3px currentColor;
+            }
+            45% {
+                opacity: 0.34;
+                transform: scale(0.92);
+                box-shadow: 0 0 2px 0px currentColor;
+            }
+            55% {
+                opacity: 0.38;
+                transform: scale(0.93);
+                box-shadow: 0 0 3px 0px currentColor;
+            }
+        }
+        @media (prefers-reduced-motion: reduce) {
+            .snowflake-item {
+                animation: none !important;
+                display: none;
+            }
+            .christmas-bulb {
+                animation: none !important;
+                opacity: 0.95;
+                box-shadow: 0 0 6px 1px currentColor;
+            }
+        }
+    </style>
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    fontFamily: {
+                        sans: ['"Montserrat"', 'system-ui', '-apple-system', 'sans-serif'],
+                        title: ['"Playfair Display"', 'Georgia', 'serif'],
+                    },
+                    colors: {
+                        accent: {
+                            DEFAULT: '#A3363D',
+                        },
+                        'brand-cream': '#FBF5E6',
+                        'brand-paper': '#FFFDF7',
+                        'brand-ink': '#2B2B2B',
+                        'brand-red': '#A3363D',
+                        'brand-red-dark': '#862B31',
+                        'brand-green': '#3F6B45',
+                        'brand-green-deep': '#2E4F35',
+                        'brand-line': '#E5DAC0',
+                        'brand-gold': '#FFE9B8',
+                        'brand-dark': '#2E4F35',
+                    },
+                    boxShadow: {
+                        'neon-accent': '0 6px 18px rgba(163, 54, 61, 0.28)',
+                        'neon-countdown': '0 10px 30px rgba(43, 43, 43, 0.10)',
+                        'card-warm': '0 10px 30px rgba(43, 43, 43, 0.10)',
+                    },
+                    keyframes: {
+                        'neon-pulse': {
+                            '0%, 100%': { 
+                                boxShadow: '0 6px 18px rgba(163, 54, 61, 0.35)',
+                                transform: 'scale(1)' 
+                            },
+                            '50%': { 
+                                boxShadow: '0 10px 26px rgba(163, 54, 61, 0.55)',
+                                transform: 'scale(1.02)'
+                            },
+                        },
+                        'attention-glow': {
+                            '0%, 100%': {
+                                boxShadow: '0 4px 14px rgba(163, 54, 61, 0.22)',
+                                borderColor: '#A3363D',
+                            },
+                            '50%': {
+                                boxShadow: '0 8px 24px rgba(163, 54, 61, 0.48), 0 0 0 3px rgba(255, 233, 184, 0.6)',
+                                borderColor: '#FFE9B8',
+                            },
+                        },
+                        'pulse-color': {
+                            '0%, 100%': { 
+                                opacity: 1, 
+                                transform: 'scale(1)' 
+                            },
+                            '50%': { 
+                                opacity: 0.96, 
+                                transform: 'scale(1.03)' 
+                            },
+                        },
+                        'neon-pulse-whatsapp': {
+                            '0%, 100%': { 
+                                boxShadow: '0 4px 12px rgba(16, 194, 70, 0.35)',
+                            },
+                            '50%': { 
+                                boxShadow: '0 8px 22px rgba(37, 211, 102, 0.6)',
+                            },
+                        },
+                        'levitate': {
+                            '0%, 100%': {
+                                transform: 'translateY(0)',
+                            },
+                            '50%': {
+                                transform: 'translateY(-6px)',
+                            }
+                        }
+                    },
+                    animation: {
+                        'neon-pulse': 'neon-pulse 2.2s infinite ease-in-out',
+                        'attention-glow': 'attention-glow 2s infinite ease-in-out',
+                        'pulse-color': 'pulse-color 2.5s infinite ease-in-out',
+                        'neon-pulse-whatsapp': 'neon-pulse-whatsapp 2.5s infinite ease-in-out',
+                        'levitate': 'levitate 3.5s ease-in-out infinite',
+                    }
+                }
+            }
+        }
+    </script>
+</head>
+<body class="bg-[#2E4F35] text-[#2B2B2B] font-sans antialiased">
+    <div id="root"></div>
+    <script type="module" src="/index.tsx"></script>
+</body>
+</html>
