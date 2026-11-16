@@ -1,4 +1,3 @@
-hooks/
 import { useState, useEffect } from 'react';
 
 export const useCurrentTime = (updateInterval = 1000) => {
