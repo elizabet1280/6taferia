@@ -113,10 +113,19 @@ const StudentAccessModal: React.FC<StudentAccessModalProps> = ({
         setTimeout(() => setPasswordSavedNotice(false), 3000);
     };
 
-    const handleEnterClassroom = () => {
-        const targetUrl =
-            studentSession?.classroomUrl?.trim() || GLOBAL_CONFIG.URL_ACCESO_PLATAFORMA;
-        window.open(targetUrl, '_blank', 'noopener,noreferrer');
+    const classroomTargetUrl =
+        studentSession?.classroomUrl?.trim() || GLOBAL_CONFIG.URL_ACCESO_PLATAFORMA;
+
+    const handlePrepareClassroomClipboard = () => {
+        const pass = studentSession?.classroomPassword?.trim();
+        if (pass && typeof navigator !== 'undefined' && navigator.clipboard?.writeText) {
+            void navigator.clipboard.writeText(pass).then(() => {
+                setCopiedField('password');
+                setTimeout(() => setCopiedField(null), 2500);
+            }).catch(() => {
+                // Ignorar si portapapeles no está disponible
+            });
+        }
     };
 
     const isIpMismatch = blockAlert?.reason === 'IP_MISMATCH';
@@ -268,7 +277,7 @@ const StudentAccessModal: React.FC<StudentAccessModalProps> = ({
                             {isEditingPassword ? (
                                 <form onSubmit={handleSaveEditedPassword} className="space-y-2">
                                     <label htmlFor="vault-pass" className="block text-xs font-bold text-[#2B2B2B]">
-                                        Tu clave de aulavirtual-premium.com
+                                        Tu clave asignada para ClassOnLive (aulavirtual-premium.com)
                                     </label>
                                     <div className="flex flex-col sm:flex-row gap-2">
                                         <input
@@ -342,13 +351,20 @@ const StudentAccessModal: React.FC<StudentAccessModalProps> = ({
                         </div>
 
                         <div className="space-y-2.5">
-                            <button
-                                type="button"
-                                onClick={handleEnterClassroom}
-                                className="w-full py-3.5 px-6 rounded-full bg-[#A3363D] hover:bg-[#862B31] text-white font-bold text-base shadow-[0_6px_16px_rgba(163,54,61,0.30)] transition-colors"
+                            <a
+                                href={classroomTargetUrl}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                onClick={handlePrepareClassroomClipboard}
+                                className="block w-full text-center py-3.5 px-6 rounded-full bg-[#A3363D] hover:bg-[#862B31] text-white font-bold text-base shadow-[0_6px_16px_rgba(163,54,61,0.30)] transition-colors"
                             >
-                                Entrar a la plataforma de clases
-                            </button>
+                                Entrar directo a ClassOnLive (Aula Virtual) →
+                            </a>
+
+                            <p className="text-[11px] text-[#2B2B2B]/75 leading-relaxed bg-[#FBF5E6] border border-[#E5DAC0] rounded-xl px-3 py-2">
+                                Al abrir <strong>ClassOnLive</strong>, si aún no has iniciado sesión allí, pega tu{' '}
+                                <strong>correo</strong> y tu <strong>clave asignada</strong> (al tocar el botón rojo copiamos tu clave automáticamente para facilitarte el ingreso).
+                            </p>
 
                             <div className="flex items-center justify-between text-xs pt-1">
                                 <span className="text-[#2B2B2B]/70 tabular-nums">

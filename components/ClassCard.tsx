@@ -225,21 +225,50 @@ const ClassCard: React.FC<ClassCardProps> = ({
                 )}
 
                 {/* Botón de acceso directo a la plataforma de clases */}
-                <button
-                    type="button"
-                    onClick={() => onGoToClass(clase.id)}
-                    className={`w-full py-4 px-5 text-base md:text-lg font-bold rounded-full transition-all transform hover:scale-[1.02] duration-200 bg-[#A3363D] hover:bg-[#862B31] text-white shadow-[0_6px_16px_rgba(163,54,61,0.30)] ${
-                        isLive ? 'animate-pulse' : ''
-                    }`}
-                >
-                    {isBlocked
-                        ? 'Ver alerta de seguridad de acceso'
-                        : studentSession
-                            ? isLive
-                                ? '¡EN VIVO! - Entrar directo a mi clase'
-                                : 'Entrar a la plataforma de clases'
-                            : 'Validar inscripción y entrar a clases'}
-                </button>
+                {studentSession && !isBlocked ? (
+                    <div className="space-y-2">
+                        <a
+                            href={studentSession.classroomUrl?.trim() || GLOBAL_CONFIG.URL_ACCESO_PLATAFORMA}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            onClick={() => {
+                                if (
+                                    studentSession.classroomPassword &&
+                                    typeof navigator !== 'undefined' &&
+                                    navigator.clipboard?.writeText
+                                ) {
+                                    void navigator.clipboard.writeText(studentSession.classroomPassword).catch(() => {});
+                                }
+                            }}
+                            className={`block w-full text-center py-4 px-5 text-base md:text-lg font-bold rounded-full transition-all transform hover:scale-[1.02] duration-200 bg-[#A3363D] hover:bg-[#862B31] text-white shadow-[0_6px_16px_rgba(163,54,61,0.30)] ${
+                                isLive ? 'animate-pulse' : ''
+                            }`}
+                        >
+                            {isLive
+                                ? '¡EN VIVO! - Entrar directo a ClassOnLive →'
+                                : 'Entrar directo a ClassOnLive (Aula Virtual) →'}
+                        </a>
+                        <button
+                            type="button"
+                            onClick={() => onGoToClass(clase.id)}
+                            className="w-full py-1.5 text-xs font-semibold text-[#3F6B45] hover:text-[#A3363D] underline underline-offset-4 transition-colors"
+                        >
+                            Ver o copiar mis datos guardados de acceso
+                        </button>
+                    </div>
+                ) : (
+                    <button
+                        type="button"
+                        onClick={() => onGoToClass(clase.id)}
+                        className={`w-full py-4 px-5 text-base md:text-lg font-bold rounded-full transition-all transform hover:scale-[1.02] duration-200 bg-[#A3363D] hover:bg-[#862B31] text-white shadow-[0_6px_16px_rgba(163,54,61,0.30)] ${
+                            isLive ? 'animate-pulse' : ''
+                        }`}
+                    >
+                        {isBlocked
+                            ? 'Ver alerta de seguridad de acceso'
+                            : 'Validar inscripción y entrar a ClassOnLive'}
+                    </button>
+                )}
 
                 {onOpenClassForum && (
                     <button
