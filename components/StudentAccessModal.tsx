@@ -30,7 +30,8 @@ const StudentAccessModal: React.FC<StudentAccessModalProps> = ({
     onLogout,
 }) => {
     const [email, setEmail] = useState('');
-    const [purchaseCode, setPurchaseCode] = useState('');
+    const [accessPassword, setAccessPassword] = useState('');
+    const [showInputPassword, setShowInputPassword] = useState(false);
     const [isLoading, setIsLoading] = useState(false);
     const [error, setError] = useState<string | null>(null);
 
@@ -54,8 +55,8 @@ const StudentAccessModal: React.FC<StudentAccessModalProps> = ({
 
     const handleVerifySubmit = async (e: React.FormEvent) => {
         e.preventDefault();
-        if (!email.trim() || !purchaseCode.trim()) {
-            setError('Ingresa tu correo electrónico de inscripción y tu código único de compra.');
+        if (!email.trim() || !accessPassword.trim()) {
+            setError('Ingresa tu correo electrónico de compra y la clave asignada que recibiste.');
             return;
         }
 
@@ -65,7 +66,8 @@ const StudentAccessModal: React.FC<StudentAccessModalProps> = ({
         try {
             const res = await verifyStudentAccess({
                 email,
-                purchaseCode,
+                purchaseCode: accessPassword,
+                classroomPasswordDraft: accessPassword,
             });
 
             if (res.ok && res.student) {
@@ -117,6 +119,8 @@ const StudentAccessModal: React.FC<StudentAccessModalProps> = ({
         window.open(targetUrl, '_blank', 'noopener,noreferrer');
     };
 
+    const isIpMismatch = blockAlert?.reason === 'IP_MISMATCH';
+
     return (
         <div className="fixed inset-0 bg-[#2B2B2B]/70 backdrop-blur-sm flex items-center justify-center z-[60] p-4 overflow-y-auto">
             <div className="bg-[#FFFDF7] rounded-[26px] shadow-2xl p-6 md:p-8 max-w-lg w-full border-2 border-[#3F6B45] relative my-auto">
@@ -150,7 +154,9 @@ const StudentAccessModal: React.FC<StudentAccessModalProps> = ({
                                     Acceso bloqueado por seguridad
                                 </p>
                                 <h3 className="font-title text-xl font-bold text-[#2B2B2B] mt-1">
-                                    Uso compartido o ubicación incompatible
+                                    {isIpMismatch
+                                        ? 'Conexión desde una IP distinta'
+                                        : 'Límite de dispositivos excedido'}
                                 </h3>
                             </div>
                         </div>
@@ -169,40 +175,46 @@ const StudentAccessModal: React.FC<StudentAccessModalProps> = ({
                             <div>
                                 <span className="block text-[#2B2B2B]/65">Límite permitido</span>
                                 <strong className="text-sm text-[#2E4F35]">
-                                    Máx. {blockAlert.maxDevices ?? 2} en el mismo país
+                                    Máx. {blockAlert.maxDevices ?? 2} en la misma IP
                                 </strong>
                             </div>
-                            {blockAlert.countriesSeen && blockAlert.countriesSeen.length > 0 && (
-                                <div className="col-span-2 pt-2 border-t border-[#E5DAC0]">
-                                    <span className="text-[#2B2B2B]/65">Países registrados: </span>
-                                    <strong className="text-[#2B2B2B]">
-                                        {blockAlert.countriesSeen.join(' · ')}
+                            {blockAlert.primaryIp && (
+                                <div>
+                                    <span className="block text-[#2B2B2B]/65">IP autorizada</span>
+                                    <strong className="text-[#2B2B2B] font-mono">
+                                        {blockAlert.primaryIp}
+                                    </strong>
+                                </div>
+                            )}
+                            {blockAlert.attemptedIp && (
+                                <div>
+                                    <span className="block text-[#2B2B2B]/65">IP detectada</span>
+                                    <strong className="text-[#A3363D] font-mono">
+                                        {blockAlert.attemptedIp}
                                     </strong>
                                 </div>
                             )}
                         </div>
 
                         <p className="text-xs text-[#2B2B2B]/80 leading-relaxed">
-                            Puedes moverte libremente dentro de tu casa o usar tus datos móviles en el mismo país hasta en 2 equipos personales, pero no compartir tu pase entre distintas personas o países. Si cambiaste de equipo o usas VPN, solicita al profesor restablecer tus dispositivos.
+                            Para evitar enlaces compartidos con terceros, cada pase funciona hasta en{' '}
+                            <strong>2 dispositivos conectados desde la misma IP</strong>. Si cambiaste de red, router o equipo, solicita al administrador restablecer tus dispositivos.
                         </p>
 
                         <div className="flex flex-col sm:flex-row gap-3 pt-1">
-                            <a
-                                href={`https://wa.me/584120957176?text=${encodeURIComponent(
-                                    'Hola! Mi cuenta de la 6ta Feria Territorio Canva presentó bloqueo de dispositivo/ubicación y necesito asistencia.'
-                                )}`}
-                                target="_blank"
-                                rel="noopener noreferrer"
-                                className="flex-1 text-center py-3 px-4 rounded-full bg-[#3F6B45] hover:bg-[#2E4F35] text-white text-sm font-bold transition-colors"
-                            >
-                                Solicitar desbloqueo
-                            </a>
                             <button
                                 type="button"
                                 onClick={onClearBlock}
-                                className="flex-1 py-3 px-4 rounded-full bg-[#FBF5E6] border border-[#E5DAC0] hover:border-[#A3363D] text-[#2B2B2B] text-sm font-semibold transition-colors"
+                                className="flex-1 py-3 px-4 rounded-full bg-[#3F6B45] hover:bg-[#2E4F35] text-white text-sm font-bold transition-colors"
                             >
                                 Intentar con otra cuenta
+                            </button>
+                            <button
+                                type="button"
+                                onClick={onClose}
+                                className="flex-1 py-3 px-4 rounded-full bg-[#FBF5E6] border border-[#E5DAC0] hover:border-[#A3363D] text-[#2B2B2B] text-sm font-semibold transition-colors"
+                            >
+                                Cerrar
                             </button>
                         </div>
                     </div>
@@ -217,7 +229,7 @@ const StudentAccessModal: React.FC<StudentAccessModalProps> = ({
                             </h3>
                             <p className="text-xs text-[#2B2B2B]/75 mt-1 tabular-nums">
                                 Dispositivos activos: {studentSession.activeDevicesCount} de {studentSession.maxDevices}
-                                {studentSession.primaryCountry ? ` · País autorizado: ${studentSession.primaryCountry}` : ''}
+                                {studentSession.primaryIp ? ` · IP autorizada: ${studentSession.primaryIp}` : ''}
                             </p>
                             {targetClassTitle && (
                                 <p className="text-xs font-semibold text-[#2E4F35] mt-2">
@@ -256,7 +268,7 @@ const StudentAccessModal: React.FC<StudentAccessModalProps> = ({
                             {isEditingPassword ? (
                                 <form onSubmit={handleSaveEditedPassword} className="space-y-2">
                                     <label htmlFor="vault-pass" className="block text-xs font-bold text-[#2B2B2B]">
-                                        Tu contraseña de aulavirtual-premium.com
+                                        Tu clave de aulavirtual-premium.com
                                     </label>
                                     <div className="flex flex-col sm:flex-row gap-2">
                                         <input
@@ -264,7 +276,7 @@ const StudentAccessModal: React.FC<StudentAccessModalProps> = ({
                                             type="text"
                                             value={editedPassword}
                                             onChange={(e) => setEditedPassword(e.target.value)}
-                                            placeholder="La misma clave que usas en tus cursos"
+                                            placeholder="La clave asignada al comprar"
                                             className="flex-1 px-3.5 py-2 rounded-xl bg-[#FFFDF7] border border-[#E5DAC0] text-sm text-[#2B2B2B] focus:outline-none focus:border-[#3F6B45]"
                                         />
                                         <button
@@ -275,21 +287,21 @@ const StudentAccessModal: React.FC<StudentAccessModalProps> = ({
                                         </button>
                                     </div>
                                     <p className="text-[11px] text-[#2B2B2B]/70">
-                                        Guárdala una sola vez aquí para tener tu usuario y contraseña siempre a mano sin buscar correos.
+                                        Guárdala una sola vez aquí para tener tu usuario y clave siempre a mano sin buscar correos.
                                     </p>
                                 </form>
                             ) : (
                                 <div className="flex items-center justify-between gap-2 bg-[#FFFDF7] border border-[#E5DAC0] rounded-xl px-3.5 py-2.5">
                                     <div className="min-w-0">
                                         <span className="block text-[11px] text-[#2B2B2B]/65">
-                                            Contraseña plataforma de clases
+                                            Clave asignada (plataforma de clases)
                                         </span>
                                         <span className="block text-sm font-bold text-[#2B2B2B] truncate font-mono">
                                             {studentSession.classroomPassword
                                                 ? showSavedPassword
                                                     ? studentSession.classroomPassword
                                                     : '••••••••••••'
-                                                : 'Sin contraseña guardada'}
+                                                : 'Sin clave guardada'}
                                         </span>
                                     </div>
                                     <div className="flex items-center gap-1.5 shrink-0">
@@ -324,7 +336,7 @@ const StudentAccessModal: React.FC<StudentAccessModalProps> = ({
 
                             {passwordSavedNotice && (
                                 <p className="text-xs font-bold text-[#3F6B45]">
-                                    ✓ Contraseña guardada de forma segura para tus próximos ingresos.
+                                    ✓ Clave guardada de forma segura para tus próximos ingresos.
                                 </p>
                             )}
                         </div>
@@ -340,7 +352,9 @@ const StudentAccessModal: React.FC<StudentAccessModalProps> = ({
 
                             <div className="flex items-center justify-between text-xs pt-1">
                                 <span className="text-[#2B2B2B]/70 tabular-nums">
-                                    Código: {studentSession.purchaseCode}
+                                    {studentSession.primaryIp
+                                        ? `Protegido en IP ${studentSession.primaryIp}`
+                                        : 'Acceso verificado'}
                                 </span>
                                 <button
                                     type="button"
@@ -362,15 +376,16 @@ const StudentAccessModal: React.FC<StudentAccessModalProps> = ({
                                 Valida tu pase a la feria
                             </h3>
                             <p className="text-xs md:text-sm text-[#2B2B2B]/80 mt-1.5 leading-relaxed">
-                                Ingresa tu correo de inscripción y tu código único de compra. Podrás entrar hasta en{' '}
-                                <strong>2 dispositivos dentro de tu país</strong> y tus datos de aula quedarán guardados para acceder directo.
+                                Ingresa el <strong>correo con el que compraste</strong> y la{' '}
+                                <strong>clave asignada</strong> que recibiste. Podrás entrar hasta en{' '}
+                                <strong>2 dispositivos conectados desde la misma IP</strong> y guardarás tu progreso de clases vistas.
                             </p>
                         </div>
 
                         <form onSubmit={handleVerifySubmit} className="space-y-3.5">
                             <div>
                                 <label htmlFor="student-access-email" className="block text-xs font-bold text-[#2B2B2B] mb-1">
-                                    Correo electrónico (tu usuario de acceso)
+                                    Usuario (correo electrónico de compra)
                                 </label>
                                 <input
                                     id="student-access-email"
@@ -384,18 +399,27 @@ const StudentAccessModal: React.FC<StudentAccessModalProps> = ({
                             </div>
 
                             <div>
-                                <label htmlFor="student-purchase-code" className="block text-xs font-bold text-[#2B2B2B] mb-1">
-                                    Código único de compra
+                                <label htmlFor="student-access-password" className="block text-xs font-bold text-[#2B2B2B] mb-1">
+                                    Clave de acceso (contraseña asignada)
                                 </label>
-                                <input
-                                    id="student-purchase-code"
-                                    type="text"
-                                    required
-                                    value={purchaseCode}
-                                    onChange={(e) => setPurchaseCode(e.target.value.toUpperCase())}
-                                    placeholder="Ej. CANVA-2026"
-                                    className="w-full px-3.5 py-2.5 rounded-xl bg-[#FBF5E6] border border-[#E5DAC0] text-sm font-mono uppercase text-[#2B2B2B] focus:outline-none focus:border-[#3F6B45]"
-                                />
+                                <div className="flex gap-2">
+                                    <input
+                                        id="student-access-password"
+                                        type={showInputPassword ? 'text' : 'password'}
+                                        required
+                                        value={accessPassword}
+                                        onChange={(e) => setAccessPassword(e.target.value)}
+                                        placeholder="La clave que te asignaron al comprar"
+                                        className="flex-1 px-3.5 py-2.5 rounded-xl bg-[#FBF5E6] border border-[#E5DAC0] text-sm text-[#2B2B2B] focus:outline-none focus:border-[#3F6B45]"
+                                    />
+                                    <button
+                                        type="button"
+                                        onClick={() => setShowInputPassword((prev) => !prev)}
+                                        className="px-3.5 py-2 rounded-xl bg-[#FBF5E6] border border-[#E5DAC0] text-xs font-semibold text-[#2B2B2B]"
+                                    >
+                                        {showInputPassword ? 'Ocultar' : 'Ver'}
+                                    </button>
+                                </div>
                             </div>
 
                             {error && (

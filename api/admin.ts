@@ -77,6 +77,24 @@ export default async function handler(req: ApiRequest, res: ApiResponse) {
             rpcName = 'verify_admin_access';
             rpcPayload = { p_admin_email: adminEmail, p_access_key: accessKey };
             break;
+        case 'register_admin':
+            rpcName = 'admin_register_user';
+            rpcPayload = {
+                p_admin_email: adminEmail,
+                p_access_key: accessKey,
+                p_display_name: String(body.displayName || 'Administrador'),
+                p_requester_email: String(body.requesterEmail || ''),
+                p_requester_key: String(body.requesterKey || ''),
+            };
+            break;
+        case 'delete_admin':
+            rpcName = 'admin_delete_user';
+            rpcPayload = {
+                p_admin_email: adminEmail,
+                p_access_key: accessKey,
+                p_target_admin_id: String(body.targetAdminId || ''),
+            };
+            break;
         case 'dashboard':
             rpcName = 'admin_list_dashboard';
             rpcPayload = { p_admin_email: adminEmail, p_access_key: accessKey };

@@ -3,10 +3,11 @@ import { isSupabaseConfigured } from '../lib/supabaseClient';
 import {
     bulkUpsertAdminStudents,
     clearAdminCredentialsLocally,
+    deleteAdminAccount,
     deleteAdminStudent,
     fetchAdminDashboard,
     getSavedAdminCredentials,
-    hasLocalAdminConfigured,
+    registerAdminAccount,
     resetAdminStudentDevices,
     saveAdminCredentialsLocally,
     upsertAdminStudent,
@@ -22,7 +23,12 @@ import {
     adminReplyForumQuestion,
     fetchForumQuestions,
 } from '../services/forumService';
-import type { AdminStudentRecord, DeviceAccessAlert, ForumQuestion } from '../types';
+import type {
+    AdminStudentRecord,
+    AdminUserSummary,
+    DeviceAccessAlert,
+    ForumQuestion,
+} from '../types';
 
 interface AdminPortalModalProps {
     isOpen: boolean;
@@ -31,9 +37,9 @@ interface AdminPortalModalProps {
     onForumUpdated?: () => void;
 }
 
-const generateRandomCode = () => {
+const generateRandomPassword = () => {
     const num = Math.floor(1000 + Math.random() * 9000);
-    return `CANVA-${num}`;
+    return `Canva${num}`;
 };
 
 const AdminPortalModal: React.FC<AdminPortalModalProps> = ({
@@ -42,9 +48,13 @@ const AdminPortalModal: React.FC<AdminPortalModalProps> = ({
     initialTab = 'students',
     onForumUpdated,
 }) => {
+    const [authMode, setAuthMode] = useState<'login' | 'register'>('login');
     const [adminEmail, setAdminEmail] = useState('');
     const [accessKey, setAccessKey] = useState('');
+    const [confirmAccessKey, setConfirmAccessKey] = useState('');
     const [displayName, setDisplayName] = useState('');
+    const [requesterEmail, setRequesterEmail] = useState('');
+    const [requesterKey, setRequesterKey] = useState('');
     const [rememberCredentials, setRememberCredentials] = useState(true);
     const [showKey, setShowKey] = useState(false);
 
@@ -53,9 +63,10 @@ const AdminPortalModal: React.FC<AdminPortalModalProps> = ({
     const [authError, setAuthError] = useState<string | null>(null);
     const [hasSavedCreds, setHasSavedCreds] = useState(false);
 
-    const [activeTab, setActiveTab] = useState<'students' | 'alerts' | 'forum'>(initialTab);
+    const [activeTab, setActiveTab] = useState<'students' | 'alerts' | 'forum' | 'admins'>(initialTab);
     const [students, setStudents] = useState<AdminStudentRecord[]>([]);
     const [alerts, setAlerts] = useState<DeviceAccessAlert[]>([]);
+    const [admins, setAdmins] = useState<AdminUserSummary[]>([]);
     const [forumQuestions, setForumQuestions] = useState<ForumQuestion[]>([]);
     const [forumFilter, setForumFilter] = useState<'pending' | 'all'>('pending');
     const [replyDrafts, setReplyDrafts] = useState<Record<string, string>>({});
@@ -65,10 +76,9 @@ const AdminPortalModal: React.FC<AdminPortalModalProps> = ({
     const [searchTerm, setSearchTerm] = useState('');
     const [feedbackMsg, setFeedbackMsg] = useState<string | null>(null);
 
-    // Formulario de alta / edición de alumna
+    // Alta / edición de alumna
     const [stuFullName, setStuFullName] = useState('');
     const [stuEmail, setStuEmail] = useState('');
-    const [stuCode, setStuCode] = useState('');
     const [stuPassword, setStuPassword] = useState('');
     const [stuUrl, setStuUrl] = useState('');
     const [stuMaxDevices, setStuMaxDevices] = useState(2);
@@ -81,6 +91,11 @@ const AdminPortalModal: React.FC<AdminPortalModalProps> = ({
     const [importAutoCodedCount, setImportAutoCodedCount] = useState(0);
     const [isImportingFile, setIsImportingFile] = useState(false);
 
+    // Registro de nuevo administrador desde el panel autenticado
+    const [newAdminName, setNewAdminName] = useState('');
+    const [newAdminEmail, setNewAdminEmail] = useState('');
+    const [newAdminKey, setNewAdminKey] = useState('');
+
     const loadDashboard = useCallback(async (email: string, key: string) => {
         setDashboardLoading(true);
         const [res, forumList] = await Promise.all([
@@ -92,6 +107,7 @@ const AdminPortalModal: React.FC<AdminPortalModalProps> = ({
         if (res.ok) {
             setStudents(res.students || []);
             setAlerts(res.alerts || []);
+            setAdmins(res.admins || []);
         } else {
             setFeedbackMsg(res.message || 'No se pudo cargar la información.');
         }
@@ -108,6 +124,7 @@ const AdminPortalModal: React.FC<AdminPortalModalProps> = ({
             setTeacherReplyName((prev) => prev || saved.displayName);
             setRememberCredentials(true);
             setHasSavedCreds(true);
+            setAuthMode('login');
         } else {
             setHasSavedCreds(false);
         }
@@ -116,8 +133,6 @@ const AdminPortalModal: React.FC<AdminPortalModalProps> = ({
     }, [isOpen, initialTab]);
 
     if (!isOpen) return null;
-
-    const isFirstLocalSetup = !isSupabaseConfigured && !hasLocalAdminConfigured();
 
     const handleAdminLogin = async (e: React.FormEvent) => {
         e.preventDefault();
@@ -138,11 +153,14 @@ const AdminPortalModal: React.FC<AdminPortalModalProps> = ({
         }
 
         const resolvedDisplay = res.displayName || displayName || 'Administrador';
+        const cleanEmail = (res.email || adminEmail).trim().toLowerCase();
         setDisplayName(resolvedDisplay);
+        setAdminEmail(cleanEmail);
+        setTeacherReplyName((prev) => prev || resolvedDisplay);
 
         if (rememberCredentials) {
             saveAdminCredentialsLocally({
-                email: adminEmail.trim().toLowerCase(),
+                email: cleanEmail,
                 accessKey: accessKey.trim(),
                 displayName: resolvedDisplay,
                 remember: true,
@@ -154,20 +172,111 @@ const AdminPortalModal: React.FC<AdminPortalModalProps> = ({
         }
 
         setIsAuthenticated(true);
-        await loadDashboard(adminEmail.trim().toLowerCase(), accessKey.trim());
+        await loadDashboard(cleanEmail, accessKey.trim());
+    };
+
+    const handleAdminRegister = async (e: React.FormEvent) => {
+        e.preventDefault();
+        setAuthError(null);
+
+        if (!adminEmail.trim() || !adminEmail.includes('@')) {
+            setAuthError('Ingresa un correo electrónico válido.');
+            return;
+        }
+        if (accessKey.trim().length < 4) {
+            setAuthError('La clave debe tener al menos 4 caracteres.');
+            return;
+        }
+        if (accessKey.trim() !== confirmAccessKey.trim()) {
+            setAuthError('Las dos claves no coinciden.');
+            return;
+        }
+
+        setAuthLoading(true);
+        const res = await registerAdminAccount({
+            adminEmail,
+            accessKey,
+            displayName: displayName.trim() || 'Administrador',
+            requesterEmail,
+            requesterKey,
+        });
+        setAuthLoading(false);
+
+        if (!res.ok) {
+            setAuthError(res.message || 'No se pudo registrar el administrador.');
+            return;
+        }
+
+        const resolvedDisplay = res.displayName || displayName.trim() || 'Administrador';
+        const cleanEmail = (res.email || adminEmail).trim().toLowerCase();
+        setDisplayName(resolvedDisplay);
+        setAdminEmail(cleanEmail);
+        setTeacherReplyName((prev) => prev || resolvedDisplay);
+        setConfirmAccessKey('');
+
+        if (rememberCredentials) {
+            saveAdminCredentialsLocally({
+                email: cleanEmail,
+                accessKey: accessKey.trim(),
+                displayName: resolvedDisplay,
+                remember: true,
+            });
+            setHasSavedCreds(true);
+        }
+
+        setIsAuthenticated(true);
+        setFeedbackMsg(`Administrador ${cleanEmail} registrado y conectado correctamente.`);
+        await loadDashboard(cleanEmail, accessKey.trim());
+    };
+
+    const handleRegisterAdditionalAdmin = async (e: React.FormEvent) => {
+        e.preventDefault();
+        if (!newAdminEmail.trim() || !newAdminKey.trim()) return;
+
+        const res = await registerAdminAccount({
+            adminEmail: newAdminEmail,
+            accessKey: newAdminKey,
+            displayName: newAdminName.trim() || 'Administrador',
+            requesterEmail: adminEmail,
+            requesterKey: accessKey,
+        });
+
+        if (res.ok) {
+            setFeedbackMsg(`Nuevo administrador ${newAdminEmail.trim().toLowerCase()} registrado.`);
+            setNewAdminName('');
+            setNewAdminEmail('');
+            setNewAdminKey('');
+            await loadDashboard(adminEmail, accessKey);
+        } else {
+            setFeedbackMsg(res.message || 'No se pudo registrar al nuevo administrador.');
+        }
+    };
+
+    const handleDeleteAdmin = async (targetAdminId: string, targetEmail: string) => {
+        const res = await deleteAdminAccount({
+            adminEmail,
+            accessKey,
+            targetAdminId,
+        });
+        if (res.ok) {
+            setFeedbackMsg(`Se eliminó al administrador ${targetEmail}.`);
+            await loadDashboard(adminEmail, accessKey);
+        } else {
+            setFeedbackMsg(res.message || 'No se pudo eliminar al administrador.');
+        }
     };
 
     const handleSaveStudent = async (e: React.FormEvent) => {
         e.preventDefault();
-        if (!stuEmail.trim() || !stuCode.trim()) return;
+        if (!stuEmail.trim() || !stuPassword.trim()) return;
 
         const res = await upsertAdminStudent({
             adminEmail,
             accessKey,
             email: stuEmail,
-            purchaseCode: stuCode,
+            purchaseCode: stuPassword.trim().toUpperCase(),
             fullName: stuFullName,
-            classroomPassword: stuPassword,
+            classroomPassword: stuPassword.trim(),
             classroomUrl: stuUrl,
             maxDevices: stuMaxDevices,
             isActive: stuActive,
@@ -177,7 +286,6 @@ const AdminPortalModal: React.FC<AdminPortalModalProps> = ({
             setFeedbackMsg(`Alumna ${stuEmail.trim().toLowerCase()} guardada correctamente.`);
             setStuFullName('');
             setStuEmail('');
-            setStuCode('');
             setStuPassword('');
             setStuUrl('');
             setStuMaxDevices(2);
@@ -250,14 +358,13 @@ const AdminPortalModal: React.FC<AdminPortalModalProps> = ({
         for (const line of lines) {
             const parts = line.split(/[;,]/).map((p) => p.trim());
             const emailPart = (parts[0] || '').toLowerCase();
-            const codePart = (parts[1] || generateRandomCode()).toUpperCase();
+            const passPart = parts[1] || parts[3] || generateRandomPassword();
             const namePart = parts[2] || '';
-            const passPart = parts[3] || '';
             if (!emailPart.includes('@')) continue;
 
             batch.push({
                 email: emailPart,
-                purchaseCode: codePart,
+                purchaseCode: passPart.toUpperCase(),
                 fullName: namePart,
                 classroomPassword: passPart,
                 classroomUrl: '',
@@ -285,8 +392,7 @@ const AdminPortalModal: React.FC<AdminPortalModalProps> = ({
     const handleEditStudent = (s: AdminStudentRecord) => {
         setStuFullName(s.fullName);
         setStuEmail(s.email);
-        setStuCode(s.purchaseCode);
-        setStuPassword(s.classroomPassword);
+        setStuPassword(s.classroomPassword || s.purchaseCode);
         setStuUrl(s.classroomUrl);
         setStuMaxDevices(s.maxDevices);
         setStuActive(s.isActive);
@@ -295,7 +401,7 @@ const AdminPortalModal: React.FC<AdminPortalModalProps> = ({
     const handleResetDevices = async (studentId: string, email: string) => {
         const res = await resetAdminStudentDevices({ adminEmail, accessKey, studentId });
         if (res.ok) {
-            setFeedbackMsg(`Dispositivos y ubicación restablecidos para ${email}.`);
+            setFeedbackMsg(`Dispositivos e IP autorizada restablecidos para ${email}.`);
             await loadDashboard(adminEmail, accessKey);
         }
     };
@@ -367,6 +473,7 @@ const AdminPortalModal: React.FC<AdminPortalModalProps> = ({
         return (
             s.email.toLowerCase().includes(q) ||
             s.fullName.toLowerCase().includes(q) ||
+            s.classroomPassword.toLowerCase().includes(q) ||
             s.purchaseCode.toLowerCase().includes(q)
         );
     });
@@ -377,6 +484,12 @@ const AdminPortalModal: React.FC<AdminPortalModalProps> = ({
         forumFilter === 'pending'
             ? forumQuestions.filter((q) => q.status === 'pending')
             : forumQuestions;
+
+    const getAlertReasonLabel = (reason: DeviceAccessAlert['reason']) => {
+        if (reason === 'IP_MISMATCH') return 'Bloqueo por IP distinta (posible enlace compartido)';
+        if (reason === 'COUNTRY_MISMATCH') return 'Bloqueo por país distinto';
+        return 'Bloqueo por exceso de dispositivos (>2 equipos)';
+    };
 
     return (
         <div className="fixed inset-0 bg-[#2B2B2B]/75 backdrop-blur-sm flex items-center justify-center z-[60] p-4 overflow-y-auto">
@@ -391,125 +504,254 @@ const AdminPortalModal: React.FC<AdminPortalModalProps> = ({
                 </button>
 
                 {!isAuthenticated ? (
-                    <div className="max-w-md mx-auto py-4 space-y-4">
+                    <div className="max-w-md mx-auto py-3 space-y-4">
                         <div className="text-center">
                             <p className="text-xs font-bold uppercase tracking-[0.16em] text-[#3F6B45]">
                                 Gestión de la feria
                             </p>
                             <h2 className="font-title italic text-2xl md:text-3xl font-bold text-[#A3363D] mt-1">
-                                Acceso Administrador
+                                Área de Administración
                             </h2>
                             <p className="text-xs text-[#2B2B2B]/75 mt-1.5">
-                                {isFirstLocalSetup
-                                    ? 'Configura por primera vez tu correo y clave de administrador local para gestionar alumnas y alertas en este navegador.'
-                                    : 'Ingresa con tu correo y clave de administrador para gestionar alumnas inscritas y alertas de dispositivos.'}
+                                {authMode === 'register'
+                                    ? 'Registra una cuenta de administrador para gestionar alumnas, claves y alertas de seguridad.'
+                                    : 'Ingresa con tu correo y clave de administrador para gestionar alumnas, dudas y alertas.'}
                             </p>
                         </div>
 
-                        {!isSupabaseConfigured && (
-                            <p className="text-xs bg-[#FBF5E6] border border-[#E5DAC0] rounded-xl p-3 text-[#2B2B2B]/85">
-                                Modo vista previa local activo (sin variables de Supabase conectadas). Al conectar Supabase en Vercel, validará contra la tabla <strong>admin_users</strong>.
-                            </p>
-                        )}
+                        {/* Selector Ingresar / Registrar administrador */}
+                        <div className="grid grid-cols-2 gap-1.5 p-1 rounded-2xl bg-[#FBF5E6] border border-[#E5DAC0]">
+                            <button
+                                type="button"
+                                onClick={() => {
+                                    setAuthMode('login');
+                                    setAuthError(null);
+                                }}
+                                className={`py-2 px-3 rounded-xl text-xs font-bold transition-colors ${
+                                    authMode === 'login'
+                                        ? 'bg-[#3F6B45] text-white shadow-xs'
+                                        : 'text-[#2B2B2B] hover:text-[#A3363D]'
+                                }`}
+                            >
+                                Iniciar sesión
+                            </button>
+                            <button
+                                type="button"
+                                onClick={() => {
+                                    setAuthMode('register');
+                                    setAuthError(null);
+                                }}
+                                className={`py-2 px-3 rounded-xl text-xs font-bold transition-colors ${
+                                    authMode === 'register'
+                                        ? 'bg-[#A3363D] text-white shadow-xs'
+                                        : 'text-[#2B2B2B] hover:text-[#3F6B45]'
+                                }`}
+                            >
+                                Registrar administrador
+                            </button>
+                        </div>
 
-                        <form onSubmit={handleAdminLogin} className="space-y-3.5">
-                            {isFirstLocalSetup && (
+                        {authMode === 'login' ? (
+                            <form onSubmit={handleAdminLogin} className="space-y-3.5">
                                 <div>
-                                    <label htmlFor="admin-display-name" className="block text-xs font-bold text-[#2B2B2B] mb-1">
-                                        Nombre del profesor / coordinador
+                                    <label htmlFor="admin-email" className="block text-xs font-bold text-[#2B2B2B] mb-1">
+                                        Correo de administrador
                                     </label>
                                     <input
-                                        id="admin-display-name"
-                                        type="text"
-                                        value={displayName}
-                                        onChange={(e) => setDisplayName(e.target.value)}
-                                        placeholder="Ej. Coordinación Feria Canva"
+                                        id="admin-email"
+                                        type="email"
+                                        required
+                                        value={adminEmail}
+                                        onChange={(e) => setAdminEmail(e.target.value)}
+                                        placeholder="admin@territoriocanva.com"
                                         className="w-full px-3.5 py-2.5 rounded-xl bg-[#FBF5E6] border border-[#E5DAC0] text-sm text-[#2B2B2B] focus:outline-none focus:border-[#3F6B45]"
                                     />
                                 </div>
-                            )}
 
-                            <div>
-                                <label htmlFor="admin-email" className="block text-xs font-bold text-[#2B2B2B] mb-1">
-                                    Correo de administrador
-                                </label>
-                                <input
-                                    id="admin-email"
-                                    type="email"
-                                    required
-                                    value={adminEmail}
-                                    onChange={(e) => setAdminEmail(e.target.value)}
-                                    placeholder="admin@territoriocanva.com"
-                                    className="w-full px-3.5 py-2.5 rounded-xl bg-[#FBF5E6] border border-[#E5DAC0] text-sm text-[#2B2B2B] focus:outline-none focus:border-[#3F6B45]"
-                                />
-                            </div>
+                                <div>
+                                    <label htmlFor="admin-key" className="block text-xs font-bold text-[#2B2B2B] mb-1">
+                                        Clave de acceso
+                                    </label>
+                                    <div className="flex gap-2">
+                                        <input
+                                            id="admin-key"
+                                            type={showKey ? 'text' : 'password'}
+                                            required
+                                            value={accessKey}
+                                            onChange={(e) => setAccessKey(e.target.value)}
+                                            placeholder="Tu clave de administrador"
+                                            className="flex-1 px-3.5 py-2.5 rounded-xl bg-[#FBF5E6] border border-[#E5DAC0] text-sm text-[#2B2B2B] focus:outline-none focus:border-[#3F6B45]"
+                                        />
+                                        <button
+                                            type="button"
+                                            onClick={() => setShowKey((prev) => !prev)}
+                                            className="px-3.5 py-2 rounded-xl bg-[#FBF5E6] border border-[#E5DAC0] text-xs font-semibold text-[#2B2B2B]"
+                                        >
+                                            {showKey ? 'Ocultar' : 'Ver'}
+                                        </button>
+                                    </div>
+                                </div>
 
-                            <div>
-                                <label htmlFor="admin-key" className="block text-xs font-bold text-[#2B2B2B] mb-1">
-                                    Clave de acceso
-                                </label>
-                                <div className="flex gap-2">
+                                <label className="flex items-center gap-2.5 text-xs text-[#2B2B2B] cursor-pointer select-none">
                                     <input
-                                        id="admin-key"
-                                        type={showKey ? 'text' : 'password'}
-                                        required
-                                        value={accessKey}
-                                        onChange={(e) => setAccessKey(e.target.value)}
-                                        placeholder="Tu clave secreta de administrador"
-                                        className="flex-1 px-3.5 py-2.5 rounded-xl bg-[#FBF5E6] border border-[#E5DAC0] text-sm text-[#2B2B2B] focus:outline-none focus:border-[#3F6B45]"
+                                        type="checkbox"
+                                        checked={rememberCredentials}
+                                        onChange={(e) => setRememberCredentials(e.target.checked)}
+                                        className="w-4 h-4 accent-[#3F6B45]"
                                     />
+                                    <span>Guardar mis credenciales de administrador en este dispositivo</span>
+                                </label>
+
+                                {authError && (
+                                    <p className="text-xs font-semibold text-[#A3363D] bg-[#A3363D]/10 p-3 rounded-xl border border-[#A3363D]/30" role="alert">
+                                        {authError}
+                                    </p>
+                                )}
+
+                                <button
+                                    type="submit"
+                                    disabled={authLoading}
+                                    className="w-full py-3 px-6 rounded-full bg-[#A3363D] hover:bg-[#862B31] disabled:opacity-60 text-white font-bold text-sm shadow-md transition-colors"
+                                >
+                                    {authLoading ? 'Verificando...' : 'Entrar al panel'}
+                                </button>
+
+                                {hasSavedCreds && (
                                     <button
                                         type="button"
-                                        onClick={() => setShowKey((prev) => !prev)}
-                                        className="px-3.5 py-2 rounded-xl bg-[#FBF5E6] border border-[#E5DAC0] text-xs font-semibold text-[#2B2B2B]"
+                                        onClick={() => {
+                                            handleForgetSavedCredentials();
+                                            setAdminEmail('');
+                                            setAccessKey('');
+                                        }}
+                                        className="w-full text-xs text-[#A3363D] hover:underline font-semibold pt-1"
                                     >
-                                        {showKey ? 'Ocultar' : 'Ver'}
+                                        Olvidar credenciales guardadas en este navegador
                                     </button>
+                                )}
+                            </form>
+                        ) : (
+                            <form onSubmit={handleAdminRegister} className="space-y-3.5">
+                                <div>
+                                    <label htmlFor="reg-admin-name" className="block text-xs font-bold text-[#2B2B2B] mb-1">
+                                        Nombre completo / Coordinador
+                                    </label>
+                                    <input
+                                        id="reg-admin-name"
+                                        type="text"
+                                        required
+                                        value={displayName}
+                                        onChange={(e) => setDisplayName(e.target.value)}
+                                        placeholder="Ej. Lisbeth Mora · Coordinación"
+                                        className="w-full px-3.5 py-2.5 rounded-xl bg-[#FBF5E6] border border-[#E5DAC0] text-sm text-[#2B2B2B] focus:outline-none focus:border-[#3F6B45]"
+                                    />
                                 </div>
-                            </div>
 
-                            <label className="flex items-center gap-2.5 text-xs text-[#2B2B2B] cursor-pointer select-none">
-                                <input
-                                    type="checkbox"
-                                    checked={rememberCredentials}
-                                    onChange={(e) => setRememberCredentials(e.target.checked)}
-                                    className="w-4 h-4 accent-[#3F6B45]"
-                                />
-                                <span>Guardar mis credenciales de administrador en este dispositivo</span>
-                            </label>
+                                <div>
+                                    <label htmlFor="reg-admin-email" className="block text-xs font-bold text-[#2B2B2B] mb-1">
+                                        Correo de administrador *
+                                    </label>
+                                    <input
+                                        id="reg-admin-email"
+                                        type="email"
+                                        required
+                                        value={adminEmail}
+                                        onChange={(e) => setAdminEmail(e.target.value)}
+                                        placeholder="tu-correo@ejemplo.com"
+                                        className="w-full px-3.5 py-2.5 rounded-xl bg-[#FBF5E6] border border-[#E5DAC0] text-sm text-[#2B2B2B] focus:outline-none focus:border-[#3F6B45]"
+                                    />
+                                </div>
 
-                            {authError && (
-                                <p className="text-xs font-semibold text-[#A3363D] bg-[#A3363D]/10 p-3 rounded-xl border border-[#A3363D]/30" role="alert">
-                                    {authError}
-                                </p>
-                            )}
+                                <div>
+                                    <label htmlFor="reg-admin-key" className="block text-xs font-bold text-[#2B2B2B] mb-1">
+                                        Nueva clave de acceso (mín. 4 caracteres) *
+                                    </label>
+                                    <div className="flex gap-2">
+                                        <input
+                                            id="reg-admin-key"
+                                            type={showKey ? 'text' : 'password'}
+                                            required
+                                            minLength={4}
+                                            value={accessKey}
+                                            onChange={(e) => setAccessKey(e.target.value)}
+                                            placeholder="Crea una clave segura"
+                                            className="flex-1 px-3.5 py-2.5 rounded-xl bg-[#FBF5E6] border border-[#E5DAC0] text-sm text-[#2B2B2B] focus:outline-none focus:border-[#3F6B45]"
+                                        />
+                                        <button
+                                            type="button"
+                                            onClick={() => setShowKey((prev) => !prev)}
+                                            className="px-3.5 py-2 rounded-xl bg-[#FBF5E6] border border-[#E5DAC0] text-xs font-semibold text-[#2B2B2B]"
+                                        >
+                                            {showKey ? 'Ocultar' : 'Ver'}
+                                        </button>
+                                    </div>
+                                </div>
 
-                            <button
-                                type="submit"
-                                disabled={authLoading}
-                                className="w-full py-3 px-6 rounded-full bg-[#A3363D] hover:bg-[#862B31] disabled:opacity-60 text-white font-bold text-sm shadow-md transition-colors"
-                            >
-                                {authLoading
-                                    ? 'Verificando...'
-                                    : isFirstLocalSetup
-                                        ? 'Guardar clave y entrar'
-                                        : 'Entrar al panel'}
-                            </button>
+                                <div>
+                                    <label htmlFor="reg-admin-confirm" className="block text-xs font-bold text-[#2B2B2B] mb-1">
+                                        Confirmar clave de acceso *
+                                    </label>
+                                    <input
+                                        id="reg-admin-confirm"
+                                        type={showKey ? 'text' : 'password'}
+                                        required
+                                        minLength={4}
+                                        value={confirmAccessKey}
+                                        onChange={(e) => setConfirmAccessKey(e.target.value)}
+                                        placeholder="Repite la clave"
+                                        className="w-full px-3.5 py-2.5 rounded-xl bg-[#FBF5E6] border border-[#E5DAC0] text-sm text-[#2B2B2B] focus:outline-none focus:border-[#3F6B45]"
+                                    />
+                                </div>
 
-                            {hasSavedCreds && (
+                                {isSupabaseConfigured && (
+                                    <div className="p-3 rounded-xl bg-[#FBF5E6] border border-[#E5DAC0] space-y-2">
+                                        <p className="text-[11px] font-semibold text-[#2B2B2B]/80">
+                                            Autorización (solo si ya existe otro administrador registrado en Supabase; déjalo vacío si es el primero):
+                                        </p>
+                                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                                            <input
+                                                type="email"
+                                                value={requesterEmail}
+                                                onChange={(e) => setRequesterEmail(e.target.value)}
+                                                placeholder="Correo admin autorizador"
+                                                className="px-3 py-2 rounded-lg bg-[#FFFDF7] border border-[#E5DAC0] text-xs text-[#2B2B2B]"
+                                            />
+                                            <input
+                                                type="password"
+                                                value={requesterKey}
+                                                onChange={(e) => setRequesterKey(e.target.value)}
+                                                placeholder="Clave admin autorizador"
+                                                className="px-3 py-2 rounded-lg bg-[#FFFDF7] border border-[#E5DAC0] text-xs text-[#2B2B2B]"
+                                            />
+                                        </div>
+                                    </div>
+                                )}
+
+                                <label className="flex items-center gap-2.5 text-xs text-[#2B2B2B] cursor-pointer select-none">
+                                    <input
+                                        type="checkbox"
+                                        checked={rememberCredentials}
+                                        onChange={(e) => setRememberCredentials(e.target.checked)}
+                                        className="w-4 h-4 accent-[#3F6B45]"
+                                    />
+                                    <span>Guardar credenciales en este dispositivo</span>
+                                </label>
+
+                                {authError && (
+                                    <p className="text-xs font-semibold text-[#A3363D] bg-[#A3363D]/10 p-3 rounded-xl border border-[#A3363D]/30" role="alert">
+                                        {authError}
+                                    </p>
+                                )}
+
                                 <button
-                                    type="button"
-                                    onClick={() => {
-                                        handleForgetSavedCredentials();
-                                        setAdminEmail('');
-                                        setAccessKey('');
-                                    }}
-                                    className="w-full text-xs text-[#A3363D] hover:underline font-semibold pt-1"
+                                    type="submit"
+                                    disabled={authLoading}
+                                    className="w-full py-3 px-6 rounded-full bg-[#3F6B45] hover:bg-[#2E4F35] disabled:opacity-60 text-white font-bold text-sm shadow-md transition-colors"
                                 >
-                                    Olvidar credenciales guardadas en este navegador
+                                    {authLoading ? 'Registrando...' : 'Registrar administrador y entrar'}
                                 </button>
-                            )}
-                        </form>
+                            </form>
+                        )}
                     </div>
                 ) : (
                     <div className="space-y-6 pr-2">
@@ -574,7 +816,7 @@ const AdminPortalModal: React.FC<AdminPortalModalProps> = ({
                                         : 'text-[#2B2B2B] hover:text-[#A3363D]'
                                 }`}
                             >
-                                Alumnas inscritas ({students.length})
+                                Alumnas ({students.length})
                             </button>
                             <button
                                 type="button"
@@ -596,7 +838,18 @@ const AdminPortalModal: React.FC<AdminPortalModalProps> = ({
                                         : 'text-[#2B2B2B] hover:text-[#A3363D]'
                                 }`}
                             >
-                                Alertas de dispositivos ({unresolvedAlertsCount})
+                                Alertas ({unresolvedAlertsCount})
+                            </button>
+                            <button
+                                type="button"
+                                onClick={() => setActiveTab('admins')}
+                                className={`px-4 py-2 rounded-xl text-xs sm:text-sm font-bold transition-colors tabular-nums ${
+                                    activeTab === 'admins'
+                                        ? 'bg-[#2B2B2B] text-white'
+                                        : 'text-[#2B2B2B] hover:text-[#3F6B45]'
+                                }`}
+                            >
+                                Administradores ({admins.length})
                             </button>
                         </div>
 
@@ -635,43 +888,36 @@ const AdminPortalModal: React.FC<AdminPortalModalProps> = ({
                                             required
                                             value={stuEmail}
                                             onChange={(e) => setStuEmail(e.target.value)}
-                                            placeholder="Correo de inscripción *"
+                                            placeholder="Usuario (correo de compra) *"
                                             className="px-3 py-2 rounded-xl bg-[#FFFDF7] border border-[#E5DAC0] text-xs sm:text-sm text-[#2B2B2B]"
                                         />
                                         <div className="flex gap-1.5">
                                             <input
                                                 type="text"
                                                 required
-                                                value={stuCode}
-                                                onChange={(e) => setStuCode(e.target.value.toUpperCase())}
-                                                placeholder="Código único *"
-                                                className="flex-1 px-3 py-2 rounded-xl bg-[#FFFDF7] border border-[#E5DAC0] text-xs sm:text-sm font-mono uppercase text-[#2B2B2B]"
+                                                value={stuPassword}
+                                                onChange={(e) => setStuPassword(e.target.value)}
+                                                placeholder="Clave asignada *"
+                                                className="flex-1 px-3 py-2 rounded-xl bg-[#FFFDF7] border border-[#E5DAC0] text-xs sm:text-sm text-[#2B2B2B]"
                                             />
                                             <button
                                                 type="button"
-                                                onClick={() => setStuCode(generateRandomCode())}
+                                                onClick={() => setStuPassword(generateRandomPassword())}
                                                 className="px-2.5 py-2 rounded-xl bg-[#FFFDF7] border border-[#E5DAC0] text-xs font-bold text-[#3F6B45]"
                                             >
                                                 Generar
                                             </button>
                                         </div>
                                         <input
-                                            type="text"
-                                            value={stuPassword}
-                                            onChange={(e) => setStuPassword(e.target.value)}
-                                            placeholder="Contraseña aula virtual (opcional)"
-                                            className="px-3 py-2 rounded-xl bg-[#FFFDF7] border border-[#E5DAC0] text-xs sm:text-sm text-[#2B2B2B]"
-                                        />
-                                        <input
                                             type="url"
                                             value={stuUrl}
                                             onChange={(e) => setStuUrl(e.target.value)}
                                             placeholder="URL directa aula (opcional)"
-                                            className="px-3 py-2 rounded-xl bg-[#FFFDF7] border border-[#E5DAC0] text-xs sm:text-sm text-[#2B2B2B]"
+                                            className="px-3 py-2 rounded-xl bg-[#FFFDF7] border border-[#E5DAC0] text-xs sm:text-sm text-[#2B2B2B] sm:col-span-2"
                                         />
                                         <div className="flex items-center justify-between gap-2 px-3 py-2 rounded-xl bg-[#FFFDF7] border border-[#E5DAC0] text-xs">
                                             <label className="flex items-center gap-1.5 font-semibold text-[#2B2B2B]">
-                                                <span>Máx. equipos:</span>
+                                                <span>Máx. equipos (misma IP):</span>
                                                 <select
                                                     value={stuMaxDevices}
                                                     onChange={(e) => setStuMaxDevices(Number(e.target.value))}
@@ -710,8 +956,8 @@ const AdminPortalModal: React.FC<AdminPortalModalProps> = ({
                                                     Importar archivo Excel (.xlsx, .xls) o CSV
                                                 </h4>
                                                 <p className="text-xs text-[#2B2B2B]/75 mt-0.5">
-                                                    Columnas admitidas: <strong>correo</strong>, <strong>codigo_compra</strong>,{' '}
-                                                    <strong>nombre</strong>, <strong>clave_aula</strong>, <strong>url_aula</strong>,{' '}
+                                                    Columnas admitidas: <strong>correo</strong>, <strong>clave_acceso</strong>,{' '}
+                                                    <strong>nombre</strong>, <strong>url_aula</strong>,{' '}
                                                     <strong>max_dispositivos</strong>, <strong>activo</strong>
                                                 </p>
                                             </div>
@@ -756,7 +1002,7 @@ const AdminPortalModal: React.FC<AdminPortalModalProps> = ({
                                                     <span className="font-bold text-[#2E4F35] tabular-nums">
                                                         Listas para importar: {parsedImportRows.length} alumnas
                                                         {importAutoCodedCount > 0
-                                                            ? ` (${importAutoCodedCount} con código autogenerado)`
+                                                            ? ` (${importAutoCodedCount} con clave autogenerada)`
                                                             : ''}
                                                         {importSkippedCount > 0
                                                             ? ` · ${importSkippedCount} filas omitidas sin correo`
@@ -791,9 +1037,8 @@ const AdminPortalModal: React.FC<AdminPortalModalProps> = ({
                                                         <thead>
                                                             <tr className="border-b border-[#E5DAC0] text-[#2B2B2B]/70">
                                                                 <th className="py-1.5 pr-3">Correo</th>
-                                                                <th className="py-1.5 pr-3">Código</th>
+                                                                <th className="py-1.5 pr-3">Clave asignada</th>
                                                                 <th className="py-1.5 pr-3">Nombre</th>
-                                                                <th className="py-1.5 pr-3">Clave aula</th>
                                                                 <th className="py-1.5">Equipos</th>
                                                             </tr>
                                                         </thead>
@@ -802,12 +1047,9 @@ const AdminPortalModal: React.FC<AdminPortalModalProps> = ({
                                                                 <tr key={`${row.email}-${idx}`}>
                                                                     <td className="py-1.5 pr-3 font-medium">{row.email}</td>
                                                                     <td className="py-1.5 pr-3 font-mono font-bold text-[#A3363D]">
-                                                                        {row.purchaseCode}
+                                                                        {row.classroomPassword || row.purchaseCode}
                                                                     </td>
                                                                     <td className="py-1.5 pr-3">{row.fullName || '—'}</td>
-                                                                    <td className="py-1.5 pr-3">
-                                                                        {row.classroomPassword ? '••••••' : '—'}
-                                                                    </td>
                                                                     <td className="py-1.5">{row.maxDevices}</td>
                                                                 </tr>
                                                             ))}
@@ -824,13 +1066,13 @@ const AdminPortalModal: React.FC<AdminPortalModalProps> = ({
 
                                         <form onSubmit={handleBulkImport} className="pt-3 border-t border-[#E5DAC0] space-y-2">
                                             <label className="block text-xs font-bold text-[#2B2B2B]">
-                                                O pega texto directo (una por línea: correo, codigo, nombre, clave_aula)
+                                                O pega texto directo (una por línea: correo, clave_acceso, nombre)
                                             </label>
                                             <textarea
                                                 rows={3}
                                                 value={bulkText}
                                                 onChange={(e) => setBulkText(e.target.value)}
-                                                placeholder={'maria@correo.com, CANVA-1001, María Pérez, ClaveAula123\nana@correo.com, CANVA-1002, Ana Gómez, ClaveAula456'}
+                                                placeholder={'maria@correo.com, ClaveNavidad2026, María Pérez\nana@correo.com, FeriaCanva456, Ana Gómez'}
                                                 className="w-full px-3 py-2 rounded-xl bg-[#FFFDF7] border border-[#E5DAC0] text-xs font-mono text-[#2B2B2B]"
                                             />
                                             <button
@@ -849,7 +1091,7 @@ const AdminPortalModal: React.FC<AdminPortalModalProps> = ({
                                         type="search"
                                         value={searchTerm}
                                         onChange={(e) => setSearchTerm(e.target.value)}
-                                        placeholder="Buscar por correo, nombre o código de compra..."
+                                        placeholder="Buscar por correo, nombre o clave..."
                                         className="w-full px-4 py-2.5 rounded-xl bg-[#FBF5E6] border border-[#E5DAC0] text-sm text-[#2B2B2B]"
                                     />
 
@@ -872,12 +1114,15 @@ const AdminPortalModal: React.FC<AdminPortalModalProps> = ({
                                                             )}
                                                         </div>
                                                         <p className="text-xs text-[#2B2B2B]/80 truncate">
-                                                            {s.email} · Código: <strong className="font-mono">{s.purchaseCode}</strong>
+                                                            {s.email} · Clave:{' '}
+                                                            <strong className="font-mono">
+                                                                {s.classroomPassword || s.purchaseCode}
+                                                            </strong>
                                                         </p>
                                                         <p className="text-xs text-[#3F6B45] font-semibold tabular-nums">
                                                             Equipos: {s.authorizedDevicesCount}/{s.maxDevices}
-                                                            {s.primaryCountry ? ` · País: ${s.primaryCountry}` : ' · País pendiente'}
-                                                            {s.classroomPassword ? ' · Clave guardada' : ''}
+                                                            {s.primaryIp ? ` · IP: ${s.primaryIp}` : ' · IP pendiente'}
+                                                            {` · Clases vistas: ${s.completedClassIds?.length ?? 0}/9`}
                                                         </p>
                                                     </div>
 
@@ -894,7 +1139,7 @@ const AdminPortalModal: React.FC<AdminPortalModalProps> = ({
                                                             onClick={() => handleResetDevices(s.id, s.email)}
                                                             className="px-3 py-1.5 rounded-full bg-[#FFFDF7] border border-[#E5DAC0] hover:border-[#3F6B45] text-xs font-bold text-[#3F6B45]"
                                                         >
-                                                            Restablecer equipos
+                                                            Restablecer IP/equipos
                                                         </button>
                                                         <button
                                                             type="button"
@@ -1041,11 +1286,11 @@ const AdminPortalModal: React.FC<AdminPortalModalProps> = ({
                                     </div>
                                 )}
                             </div>
-                        ) : (
+                        ) : activeTab === 'alerts' ? (
                             <div className="space-y-3">
                                 {alerts.length === 0 ? (
                                     <p className="text-center text-sm text-[#2B2B2B]/75 py-8 bg-[#FBF5E6] rounded-2xl border border-[#E5DAC0]">
-                                        No hay alertas de uso compartido o cambios de país registradas.
+                                        No hay alertas de uso compartido, cambios de IP o exceso de equipos registradas.
                                     </p>
                                 ) : (
                                     <div className="space-y-2.5 max-h-96 overflow-y-auto pr-1">
@@ -1060,20 +1305,22 @@ const AdminPortalModal: React.FC<AdminPortalModalProps> = ({
                                             >
                                                 <div className="space-y-1">
                                                     <p className="text-xs font-bold uppercase tracking-wider text-[#A3363D]">
-                                                        {alert.reason === 'COUNTRY_MISMATCH'
-                                                            ? 'Bloqueo por país distinto'
-                                                            : 'Bloqueo por exceso de dispositivos'}
+                                                        {getAlertReasonLabel(alert.reason)}
                                                         {alert.resolved ? ' · Resuelta' : ''}
                                                     </p>
                                                     <p className="text-sm font-bold text-[#2B2B2B] tabular-nums">
-                                                        {alert.fullName ? `${alert.fullName} (${alert.email})` : alert.email} ha ingresado en{' '}
-                                                        {alert.detectedDevicesCount} dispositivos
+                                                        {alert.fullName ? `${alert.fullName} (${alert.email})` : alert.email} registra{' '}
+                                                        {alert.detectedDevicesCount} dispositivos intentando conectarse
                                                     </p>
                                                     <p className="text-xs text-[#2B2B2B]/80 tabular-nums">
                                                         Equipo bloqueado: {alert.attemptedDeviceLabel}
-                                                        {alert.attemptedCountry ? ` · País intento: ${alert.attemptedCountry}` : ''}
-                                                        {alert.countriesSeen.length > 0 ? ` · Países vistos: ${alert.countriesSeen.join(', ')}` : ''}
-                                                        {alert.attemptedIp ? ` · IP: ${alert.attemptedIp}` : ''}
+                                                        {alert.attemptedIp ? ` · IP detectada: ${alert.attemptedIp}` : ''}
+                                                        {alert.ipsSeen && alert.ipsSeen.length > 0
+                                                            ? ` · IPs vistas: ${alert.ipsSeen.join(', ')}`
+                                                            : ''}
+                                                        {alert.countriesSeen.length > 0
+                                                            ? ` · Países: ${alert.countriesSeen.join(', ')}`
+                                                            : ''}
                                                     </p>
                                                 </div>
 
@@ -1090,6 +1337,90 @@ const AdminPortalModal: React.FC<AdminPortalModalProps> = ({
                                         ))}
                                     </div>
                                 )}
+                            </div>
+                        ) : (
+                            <div className="space-y-5">
+                                <form
+                                    onSubmit={handleRegisterAdditionalAdmin}
+                                    className="bg-[#FBF5E6] border border-[#E5DAC0] rounded-2xl p-4 md:p-5 space-y-3"
+                                >
+                                    <h3 className="font-bold text-sm text-[#2B2B2B]">
+                                        Registrar nuevo administrador
+                                    </h3>
+                                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                                        <input
+                                            type="text"
+                                            required
+                                            value={newAdminName}
+                                            onChange={(e) => setNewAdminName(e.target.value)}
+                                            placeholder="Nombre del administrador *"
+                                            className="px-3 py-2 rounded-xl bg-[#FFFDF7] border border-[#E5DAC0] text-xs sm:text-sm text-[#2B2B2B]"
+                                        />
+                                        <input
+                                            type="email"
+                                            required
+                                            value={newAdminEmail}
+                                            onChange={(e) => setNewAdminEmail(e.target.value)}
+                                            placeholder="Correo de administrador *"
+                                            className="px-3 py-2 rounded-xl bg-[#FFFDF7] border border-[#E5DAC0] text-xs sm:text-sm text-[#2B2B2B]"
+                                        />
+                                        <input
+                                            type="text"
+                                            required
+                                            minLength={4}
+                                            value={newAdminKey}
+                                            onChange={(e) => setNewAdminKey(e.target.value)}
+                                            placeholder="Clave de acceso (mín. 4) *"
+                                            className="px-3 py-2 rounded-xl bg-[#FFFDF7] border border-[#E5DAC0] text-xs sm:text-sm text-[#2B2B2B]"
+                                        />
+                                    </div>
+                                    <button
+                                        type="submit"
+                                        className="px-6 py-2.5 rounded-full bg-[#3F6B45] hover:bg-[#2E4F35] text-white text-xs sm:text-sm font-bold transition-colors"
+                                    >
+                                        Registrar administrador
+                                    </button>
+                                </form>
+
+                                <div className="space-y-2.5 max-h-72 overflow-y-auto pr-1">
+                                    {admins.length === 0 ? (
+                                        <p className="text-center text-sm text-[#2B2B2B]/70 py-6 bg-[#FBF5E6] rounded-2xl border border-[#E5DAC0]">
+                                            Solo tu sesión actual está activa.
+                                        </p>
+                                    ) : (
+                                        admins.map((adm) => {
+                                            const isSelf =
+                                                adm.adminEmail.toLowerCase() === adminEmail.trim().toLowerCase();
+                                            return (
+                                                <div
+                                                    key={adm.id}
+                                                    className="p-3.5 rounded-2xl bg-[#FBF5E6] border border-[#E5DAC0] flex flex-wrap items-center justify-between gap-3"
+                                                >
+                                                    <div>
+                                                        <p className="text-sm font-bold text-[#2B2B2B]">
+                                                            {adm.displayName}{' '}
+                                                            {isSelf && (
+                                                                <span className="text-xs font-bold text-[#3F6B45]">
+                                                                    (Sesión actual)
+                                                                </span>
+                                                            )}
+                                                        </p>
+                                                        <p className="text-xs text-[#2B2B2B]/75">{adm.adminEmail}</p>
+                                                    </div>
+                                                    {!isSelf && (
+                                                        <button
+                                                            type="button"
+                                                            onClick={() => handleDeleteAdmin(adm.id, adm.adminEmail)}
+                                                            className="px-3 py-1.5 rounded-full bg-[#FFFDF7] border border-[#E5DAC0] hover:border-[#A3363D] text-xs font-bold text-[#A3363D]"
+                                                        >
+                                                            Eliminar
+                                                        </button>
+                                                    )}
+                                                </div>
+                                            );
+                                        })
+                                    )}
+                                </div>
                             </div>
                         )}
                     </div>

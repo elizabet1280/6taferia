@@ -60,12 +60,15 @@ const isPrivateOrLocalIp = (ip: string): boolean => {
 };
 
 async function extractGeoContext(req: ApiRequest): Promise<{ ip: string; country: string; city: string }> {
-    const forwardedFor = getHeader(req.headers, 'x-forwarded-for');
-    const ip =
+    const forwardedFor =
+        getHeader(req.headers, 'x-vercel-forwarded-for') ||
+        getHeader(req.headers, 'x-forwarded-for');
+    const rawIp =
         forwardedFor.split(',')[0]?.trim() ||
         getHeader(req.headers, 'x-real-ip').trim() ||
         req.socket?.remoteAddress ||
         '';
+    const ip = rawIp.replace(/^::ffff:/, '').replace(/^::1$/, '127.0.0.1');
 
     let country =
         getHeader(req.headers, 'x-vercel-ip-country').trim().toUpperCase() ||
@@ -124,26 +127,36 @@ export default async function handler(req: ApiRequest, res: ApiResponse) {
     const action = typeof body.action === 'string' ? body.action : 'verify';
     const geo = await extractGeoContext(req);
 
-    const rpcName =
-        action === 'save_credentials' ? 'save_student_classroom_credentials' : 'verify_student_access';
+    let rpcName = 'verify_student_access';
+    let rpcPayload: Record<string, unknown>;
 
-    const rpcPayload =
-        action === 'save_credentials'
-            ? {
-                  p_email: String(body.email || ''),
-                  p_purchase_code: String(body.purchaseCode || ''),
-                  p_device_id: String(body.deviceId || ''),
-                  p_classroom_password: String(body.classroomPassword || ''),
-              }
-            : {
-                  p_email: String(body.email || ''),
-                  p_purchase_code: String(body.purchaseCode || ''),
-                  p_device_id: String(body.deviceId || ''),
-                  p_device_label: String(body.deviceLabel || 'Dispositivo'),
-                  p_ip_address: geo.ip,
-                  p_country_code: geo.country,
-                  p_city: geo.city,
-              };
+    if (action === 'save_credentials') {
+        rpcName = 'save_student_classroom_credentials';
+        rpcPayload = {
+            p_email: String(body.email || ''),
+            p_purchase_code: String(body.purchaseCode || ''),
+            p_device_id: String(body.deviceId || ''),
+            p_classroom_password: String(body.classroomPassword || ''),
+        };
+    } else if (action === 'save_progress') {
+        rpcName = 'save_student_progress';
+        rpcPayload = {
+            p_email: String(body.email || ''),
+            p_purchase_code: String(body.purchaseCode || ''),
+            p_device_id: String(body.deviceId || ''),
+            p_completed_class_ids: Array.isArray(body.completedClassIds) ? body.completedClassIds : [],
+        };
+    } else {
+        rpcPayload = {
+            p_email: String(body.email || ''),
+            p_purchase_code: String(body.purchaseCode || ''),
+            p_device_id: String(body.deviceId || ''),
+            p_device_label: String(body.deviceLabel || 'Dispositivo'),
+            p_ip_address: geo.ip,
+            p_country_code: geo.country,
+            p_city: geo.city,
+        };
+    }
 
     try {
         const rpcRes = await fetch(`${supabaseUrl}/rest/v1/rpc/${rpcName}`, {

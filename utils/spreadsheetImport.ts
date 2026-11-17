@@ -87,6 +87,16 @@ export async function parseStudentsSpreadsheet(file: File): Promise<SpreadsheetP
             return;
         }
 
+        const classroomPassword = pickValue(normalizedRow, [
+            'clave_acceso',
+            'clave_aula',
+            'clave',
+            'contrasena',
+            'contrasena_aula',
+            'password',
+            'classroom_password',
+        ]);
+
         let purchaseCode = pickValue(normalizedRow, [
             'codigo_compra',
             'codigo',
@@ -98,10 +108,16 @@ export async function parseStudentsSpreadsheet(file: File): Promise<SpreadsheetP
             'folio',
         ]).toUpperCase();
 
+        if (!purchaseCode && classroomPassword) {
+            purchaseCode = classroomPassword.toUpperCase();
+        }
+
         if (!purchaseCode) {
             purchaseCode = generateCode(idx + 1);
             autoCodedCount += 1;
         }
+
+        const effectivePassword = classroomPassword || purchaseCode;
 
         const fullName = pickValue(normalizedRow, [
             'nombre',
@@ -111,15 +127,6 @@ export async function parseStudentsSpreadsheet(file: File): Promise<SpreadsheetP
             'participante',
             'full_name',
             'name',
-        ]);
-
-        const classroomPassword = pickValue(normalizedRow, [
-            'clave_aula',
-            'contrasena',
-            'contrasena_aula',
-            'clave',
-            'password',
-            'classroom_password',
         ]);
 
         const classroomUrl = pickValue(normalizedRow, [
@@ -149,7 +156,7 @@ export async function parseStudentsSpreadsheet(file: File): Promise<SpreadsheetP
             email,
             purchaseCode,
             fullName,
-            classroomPassword,
+            classroomPassword: effectivePassword,
             classroomUrl,
             maxDevices,
             isActive,
@@ -162,18 +169,16 @@ export async function parseStudentsSpreadsheet(file: File): Promise<SpreadsheetP
 const TEMPLATE_SAMPLE_DATA = [
     {
         correo: 'maria.gonzalez@ejemplo.com',
-        codigo_compra: 'CANVA-1001',
+        clave_acceso: 'ClaveNavidad2026',
         nombre: 'María González',
-        clave_aula: 'ClaveAulaVirtual',
         url_aula: '',
         max_dispositivos: 2,
         activo: 'SI',
     },
     {
         correo: 'ana.perez@ejemplo.com',
-        codigo_compra: 'CANVA-1002',
+        clave_acceso: 'FeriaCanva456',
         nombre: 'Ana Pérez',
-        clave_aula: 'ClaveAulaVirtual',
         url_aula: '',
         max_dispositivos: 2,
         activo: 'SI',

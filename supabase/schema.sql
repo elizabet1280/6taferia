@@ -50,11 +50,17 @@ create table if not exists public.enrolled_students (
     classroom_password text not null default '',
     classroom_url text not null default '',
     primary_country text,
+    primary_ip text,
     max_devices integer not null default 2 check (max_devices between 1 and 5),
     is_active boolean not null default true,
+    completed_class_ids jsonb not null default '[]'::jsonb,
     created_at timestamptz not null default now(),
     updated_at timestamptz not null default now()
 );
+
+alter table public.enrolled_students
+    add column if not exists primary_ip text,
+    add column if not exists completed_class_ids jsonb not null default '[]'::jsonb;
 
 create index if not exists idx_enrolled_students_email_lower
     on public.enrolled_students (lower(email));
@@ -83,14 +89,25 @@ create table if not exists public.device_access_alerts (
     full_name text not null default '',
     detected_devices_count integer not null default 1,
     countries_seen text[] not null default '{}',
+    ips_seen text[] not null default '{}',
     attempted_device_id text not null default '',
     attempted_device_label text not null default '',
     attempted_ip text not null default '',
     attempted_country text not null default '',
-    reason text not null check (reason in ('MAX_DEVICES', 'COUNTRY_MISMATCH')),
+    reason text not null check (reason in ('MAX_DEVICES', 'IP_MISMATCH', 'COUNTRY_MISMATCH')),
     resolved boolean not null default false,
     created_at timestamptz not null default now()
 );
+
+alter table public.device_access_alerts
+    add column if not exists ips_seen text[] not null default '{}';
+
+alter table public.device_access_alerts
+    drop constraint if exists device_access_alerts_reason_check;
+
+alter table public.device_access_alerts
+    add constraint device_access_alerts_reason_check
+    check (reason in ('MAX_DEVICES', 'IP_MISMATCH', 'COUNTRY_MISMATCH'));
 
 create index if not exists idx_device_access_alerts_created
     on public.device_access_alerts (created_at desc);
@@ -112,7 +129,7 @@ alter table public.device_access_alerts enable row level security;
 alter table public.admin_users enable row level security;
 
 -- =====================================================================
--- 3. FUNCIONES RPC PARA ALUMNAS (VALIDACIÓN DE PAGO, IP Y DISPOSITIVOS)
+-- 3. FUNCIONES RPC PARA ALUMNAS (CLAVE ASIGNADA, MISMA IP Y PROGRESO)
 -- =====================================================================
 create or replace function public.verify_student_access(
     p_email text,
@@ -130,10 +147,11 @@ set search_path = public, extensions
 as $$
 declare
     v_email text := lower(trim(coalesce(p_email, '')));
-    v_code text := upper(trim(coalesce(p_purchase_code, '')));
+    v_raw_code text := trim(coalesce(p_purchase_code, ''));
+    v_code text := upper(v_raw_code);
     v_device_id text := trim(coalesce(p_device_id, ''));
     v_device_label text := left(trim(coalesce(p_device_label, 'Dispositivo')), 120);
-    v_ip text := left(trim(coalesce(p_ip_address, '')), 64);
+    v_ip text := regexp_replace(left(trim(coalesce(p_ip_address, '')), 64), '^::ffff:', '');
     v_country text := upper(left(trim(coalesce(p_country_code, '')), 8));
     v_city text := left(trim(coalesce(p_city, '')), 100);
     v_student public.enrolled_students%rowtype;
@@ -141,12 +159,17 @@ declare
     v_auth_count integer := 0;
     v_total_devices integer := 0;
     v_countries text[] := '{}';
+    v_ips text[] := '{}';
 begin
-    if v_email = '' or v_code = '' or v_device_id = '' then
+    if v_ip = '::1' then
+        v_ip := '127.0.0.1';
+    end if;
+
+    if v_email = '' or v_raw_code = '' or v_device_id = '' then
         return jsonb_build_object(
             'ok', false,
             'status', 'INVALID_CREDENTIALS',
-            'message', 'Ingresa tu correo de inscripción y tu código único de compra.'
+            'message', 'Ingresa tu correo electrónico de compra y la clave asignada que recibiste.'
         );
     end if;
 
@@ -154,14 +177,17 @@ begin
     into v_student
     from public.enrolled_students
     where lower(email) = v_email
-      and upper(purchase_code) = v_code
+      and (
+          upper(purchase_code) = v_code
+          or (trim(classroom_password) <> '' and trim(classroom_password) = v_raw_code)
+      )
     limit 1;
 
     if not found then
         return jsonb_build_object(
             'ok', false,
             'status', 'INVALID_CREDENTIALS',
-            'message', 'El correo electrónico o el código de compra no coinciden con una inscripción registrada.'
+            'message', 'No encontramos ese correo o clave en la lista de alumnas registradas. Verifica tus datos o pide a coordinación registrar tu inscripción.'
         );
     end if;
 
@@ -173,7 +199,15 @@ begin
         );
     end if;
 
-    -- Fija el país principal en el primer ingreso verificado (si la cabecera de red lo provee)
+    -- Fija IP principal y país principal en el primer ingreso verificado
+    if (v_student.primary_ip is null or trim(v_student.primary_ip) = '') and v_ip <> '' then
+        update public.enrolled_students
+        set primary_ip = v_ip,
+            updated_at = now()
+        where id = v_student.id;
+        v_student.primary_ip := v_ip;
+    end if;
+
     if (v_student.primary_country is null or trim(v_student.primary_country) = '') and v_country <> '' then
         update public.enrolled_students
         set primary_country = v_country,
@@ -182,7 +216,76 @@ begin
         v_student.primary_country := v_country;
     end if;
 
-    -- Bloqueo geográfico entre países distintos (ej. EE. UU. vs Venezuela)
+    -- Bloqueo estricto por IP distinta (los 2 equipos permitidos deben compartir la misma IP)
+    if v_student.primary_ip is not null
+       and trim(v_student.primary_ip) <> ''
+       and v_ip <> ''
+       and v_student.primary_ip <> v_ip then
+
+        insert into public.student_devices (
+            student_id, device_id, device_label, ip_address, country_code, city, is_authorized
+        )
+        values (
+            v_student.id, v_device_id, v_device_label, v_ip, v_country, v_city, false
+        )
+        on conflict (student_id, device_id) do update
+        set device_label = excluded.device_label,
+            ip_address = excluded.ip_address,
+            country_code = excluded.country_code,
+            city = excluded.city,
+            is_authorized = false,
+            last_seen_at = now();
+
+        select count(*)::integer into v_total_devices
+        from public.student_devices
+        where student_id = v_student.id;
+
+        select array_agg(distinct c)
+        into v_countries
+        from (
+            select upper(country_code) as c from public.student_devices
+            where student_id = v_student.id and trim(country_code) <> ''
+            union
+            select upper(v_student.primary_country) as c where v_student.primary_country is not null and trim(v_student.primary_country) <> ''
+        ) sub;
+
+        select array_agg(distinct ip_val)
+        into v_ips
+        from (
+            select trim(ip_address) as ip_val from public.student_devices
+            where student_id = v_student.id and trim(ip_address) <> ''
+            union
+            select trim(v_student.primary_ip) as ip_val where trim(v_student.primary_ip) <> ''
+        ) sub_ip;
+
+        insert into public.device_access_alerts (
+            student_id, email, full_name, detected_devices_count, countries_seen, ips_seen,
+            attempted_device_id, attempted_device_label, attempted_ip, attempted_country, reason
+        ) values (
+            v_student.id, v_student.email, v_student.full_name, v_total_devices, coalesce(v_countries, '{}'), coalesce(v_ips, '{}'),
+            v_device_id, v_device_label, v_ip, v_country, 'IP_MISMATCH'
+        );
+
+        return jsonb_build_object(
+            'ok', false,
+            'status', 'BLOCKED_GEO',
+            'reason', 'IP_MISMATCH',
+            'detectedDevicesCount', v_total_devices,
+            'maxDevices', v_student.max_devices,
+            'primaryCountry', coalesce(v_student.primary_country, ''),
+            'attemptedCountry', v_country,
+            'countriesSeen', coalesce(v_countries, '{}'::text[]),
+            'primaryIp', v_student.primary_ip,
+            'attemptedIp', v_ip,
+            'ipsSeen', coalesce(v_ips, '{}'::text[]),
+            'message', format(
+                'Alerta de seguridad: este acceso solo está permitido hasta en %s dispositivos conectados desde la misma IP (%s). Se bloqueó el intento desde otra IP (%s).',
+                v_student.max_devices, v_student.primary_ip, v_ip
+            )
+        );
+    end if;
+
+    -- Bloqueo geográfico de respaldo si no se obtuvo IP pero sí países distintos
     if v_student.primary_country is not null
        and trim(v_student.primary_country) <> ''
        and v_country <> ''
@@ -216,21 +319,24 @@ begin
         ) sub;
 
         insert into public.device_access_alerts (
-            student_id, email, full_name, detected_devices_count, countries_seen,
+            student_id, email, full_name, detected_devices_count, countries_seen, ips_seen,
             attempted_device_id, attempted_device_label, attempted_ip, attempted_country, reason
         ) values (
             v_student.id, v_student.email, v_student.full_name, v_total_devices, coalesce(v_countries, '{}'),
+            case when v_ip <> '' then array[v_ip] else '{}'::text[] end,
             v_device_id, v_device_label, v_ip, v_country, 'COUNTRY_MISMATCH'
         );
 
         return jsonb_build_object(
             'ok', false,
             'status', 'BLOCKED_GEO',
+            'reason', 'COUNTRY_MISMATCH',
             'detectedDevicesCount', v_total_devices,
             'maxDevices', v_student.max_devices,
             'primaryCountry', v_student.primary_country,
             'attemptedCountry', v_country,
             'countriesSeen', coalesce(v_countries, '{}'::text[]),
+            'primaryIp', coalesce(v_student.primary_ip, ''),
             'attemptedIp', v_ip,
             'message', format(
                 'Alerta de seguridad: esta alumna ha ingresado en %s dispositivos y se detectó un intento desde un país distinto (%s vs %s).',
@@ -270,11 +376,13 @@ begin
                 'email', v_student.email,
                 'fullName', v_student.full_name,
                 'purchaseCode', v_student.purchase_code,
-                'classroomPassword', v_student.classroom_password,
+                'classroomPassword', case when trim(v_student.classroom_password) <> '' then v_student.classroom_password else v_raw_code end,
                 'classroomUrl', v_student.classroom_url,
                 'primaryCountry', coalesce(v_student.primary_country, v_country, ''),
+                'primaryIp', coalesce(v_student.primary_ip, v_ip, ''),
                 'activeDevicesCount', v_auth_count,
-                'maxDevices', v_student.max_devices
+                'maxDevices', v_student.max_devices,
+                'completedClassIds', coalesce(v_student.completed_class_ids, '[]'::jsonb)
             )
         );
     end if;
@@ -297,17 +405,19 @@ begin
         return jsonb_build_object(
             'ok', true,
             'status', 'VERIFIED',
-            'message', 'Dispositivo autorizado. Tus datos quedan guardados para entrar directo.',
+            'message', 'Dispositivo autorizado en tu IP. Tus datos quedan guardados para entrar directo.',
             'student', jsonb_build_object(
                 'studentId', v_student.id,
                 'email', v_student.email,
                 'fullName', v_student.full_name,
                 'purchaseCode', v_student.purchase_code,
-                'classroomPassword', v_student.classroom_password,
+                'classroomPassword', case when trim(v_student.classroom_password) <> '' then v_student.classroom_password else v_raw_code end,
                 'classroomUrl', v_student.classroom_url,
                 'primaryCountry', coalesce(v_student.primary_country, v_country, ''),
+                'primaryIp', coalesce(v_student.primary_ip, v_ip, ''),
                 'activeDevicesCount', v_auth_count + 1,
-                'maxDevices', v_student.max_devices
+                'maxDevices', v_student.max_devices,
+                'completedClassIds', coalesce(v_student.completed_class_ids, '[]'::jsonb)
             )
         );
     end if;
@@ -340,25 +450,37 @@ begin
         select upper(v_student.primary_country) as c where v_student.primary_country is not null and trim(v_student.primary_country) <> ''
     ) sub;
 
+    select array_agg(distinct ip_val)
+    into v_ips
+    from (
+        select trim(ip_address) as ip_val from public.student_devices
+        where student_id = v_student.id and trim(ip_address) <> ''
+        union
+        select trim(v_student.primary_ip) as ip_val where v_student.primary_ip is not null and trim(v_student.primary_ip) <> ''
+    ) sub_ip;
+
     insert into public.device_access_alerts (
-        student_id, email, full_name, detected_devices_count, countries_seen,
+        student_id, email, full_name, detected_devices_count, countries_seen, ips_seen,
         attempted_device_id, attempted_device_label, attempted_ip, attempted_country, reason
     ) values (
-        v_student.id, v_student.email, v_student.full_name, v_total_devices, coalesce(v_countries, '{}'),
+        v_student.id, v_student.email, v_student.full_name, v_total_devices, coalesce(v_countries, '{}'), coalesce(v_ips, '{}'),
         v_device_id, v_device_label, v_ip, v_country, 'MAX_DEVICES'
     );
 
     return jsonb_build_object(
         'ok', false,
         'status', 'BLOCKED_MAX_DEVICES',
+        'reason', 'MAX_DEVICES',
         'detectedDevicesCount', v_total_devices,
         'maxDevices', v_student.max_devices,
         'primaryCountry', coalesce(v_student.primary_country, ''),
         'attemptedCountry', v_country,
         'countriesSeen', coalesce(v_countries, '{}'::text[]),
+        'primaryIp', coalesce(v_student.primary_ip, ''),
         'attemptedIp', v_ip,
+        'ipsSeen', coalesce(v_ips, '{}'::text[]),
         'message', format(
-            'Alerta de seguridad: esta alumna ha ingresado en %s dispositivos distintos. El máximo permitido es %s dispositivos por cuenta.',
+            'Alerta de seguridad: se detectaron %s dispositivos intentando usar esta clave. El máximo permitido es %s dispositivos en la misma IP.',
             v_total_devices, v_student.max_devices
         )
     );
@@ -378,7 +500,8 @@ set search_path = public, extensions
 as $$
 declare
     v_email text := lower(trim(coalesce(p_email, '')));
-    v_code text := upper(trim(coalesce(p_purchase_code, '')));
+    v_raw_code text := trim(coalesce(p_purchase_code, ''));
+    v_code text := upper(v_raw_code);
     v_device_id text := trim(coalesce(p_device_id, ''));
     v_student_id uuid;
 begin
@@ -387,7 +510,10 @@ begin
     from public.enrolled_students s
     join public.student_devices d on d.student_id = s.id
     where lower(s.email) = v_email
-      and upper(s.purchase_code) = v_code
+      and (
+          upper(s.purchase_code) = v_code
+          or (trim(s.classroom_password) <> '' and trim(s.classroom_password) = v_raw_code)
+      )
       and s.is_active = true
       and d.device_id = v_device_id
       and d.is_authorized = true
@@ -403,6 +529,56 @@ begin
     where id = v_student_id;
 
     return jsonb_build_object('ok', true);
+end;
+$$;
+
+create or replace function public.save_student_progress(
+    p_email text,
+    p_purchase_code text,
+    p_device_id text,
+    p_completed_class_ids jsonb default '[]'::jsonb
+)
+returns jsonb
+language plpgsql
+security definer
+set search_path = public, extensions
+as $$
+declare
+    v_email text := lower(trim(coalesce(p_email, '')));
+    v_raw_code text := trim(coalesce(p_purchase_code, ''));
+    v_code text := upper(v_raw_code);
+    v_device_id text := trim(coalesce(p_device_id, ''));
+    v_student_id uuid;
+    v_progress jsonb := coalesce(p_completed_class_ids, '[]'::jsonb);
+begin
+    if jsonb_typeof(v_progress) <> 'array' then
+        v_progress := '[]'::jsonb;
+    end if;
+
+    select s.id
+    into v_student_id
+    from public.enrolled_students s
+    join public.student_devices d on d.student_id = s.id
+    where lower(s.email) = v_email
+      and (
+          upper(s.purchase_code) = v_code
+          or (trim(s.classroom_password) <> '' and trim(s.classroom_password) = v_raw_code)
+      )
+      and s.is_active = true
+      and d.device_id = v_device_id
+      and d.is_authorized = true
+    limit 1;
+
+    if not found then
+        return jsonb_build_object('ok', false, 'message', 'Dispositivo no autorizado.');
+    end if;
+
+    update public.enrolled_students
+    set completed_class_ids = v_progress,
+        updated_at = now()
+    where id = v_student_id;
+
+    return jsonb_build_object('ok', true, 'completedClassIds', v_progress);
 end;
 $$;
 
@@ -458,7 +634,7 @@ begin
     if not public.is_valid_admin(v_email, p_access_key) then
         return jsonb_build_object(
             'ok', false,
-            'message', 'Correo o clave de administrador incorrectos.'
+            'message', 'Correo o clave de administrador incorrectos. Si es tu primera vez, usa "Registrar administrador".'
         );
     end if;
 
@@ -475,6 +651,109 @@ begin
 end;
 $$;
 
+create or replace function public.admin_register_user(
+    p_admin_email text,
+    p_access_key text,
+    p_display_name text default 'Administrador',
+    p_requester_email text default '',
+    p_requester_key text default ''
+)
+returns jsonb
+language plpgsql
+security definer
+set search_path = public, extensions
+as $$
+declare
+    v_email text := lower(trim(coalesce(p_admin_email, '')));
+    v_key text := trim(coalesce(p_access_key, ''));
+    v_name text := left(coalesce(nullif(trim(p_display_name), ''), 'Administrador'), 120);
+    v_req_email text := lower(trim(coalesce(p_requester_email, '')));
+    v_req_key text := trim(coalesce(p_requester_key, ''));
+    v_real_admins_count integer := 0;
+begin
+    if v_email = '' or position('@' in v_email) = 0 or char_length(v_key) < 4 then
+        return jsonb_build_object(
+            'ok', false,
+            'message', 'Ingresa un correo válido y una clave de al menos 4 caracteres.'
+        );
+    end if;
+
+    select count(*)::integer
+    into v_real_admins_count
+    from public.admin_users
+    where is_active = true
+      and not (
+          lower(admin_email) = 'admin@territoriocanva.com'
+          and access_key_hash = extensions.crypt('CAMBIA-ESTA-CLAVE-SEGURA', access_key_hash)
+      );
+
+    -- Si ya existe al menos un administrador real configurado, requiere autorización de un administrador vigente
+    if v_real_admins_count > 0 then
+        if not public.is_valid_admin(v_req_email, v_req_key) then
+            return jsonb_build_object(
+                'ok', false,
+                'message', 'Ya existe un administrador activo. Ingresa con tu cuenta para registrar nuevos administradores o ingresa el correo y clave del administrador autorizador.'
+            );
+        end if;
+    else
+        -- Primer registro real: limpia la fila de ejemplo si cambió el correo
+        delete from public.admin_users
+        where lower(admin_email) = 'admin@territoriocanva.com'
+          and lower(admin_email) <> v_email
+          and access_key_hash = extensions.crypt('CAMBIA-ESTA-CLAVE-SEGURA', access_key_hash);
+    end if;
+
+    insert into public.admin_users (admin_email, display_name, access_key_hash, is_active)
+    values (
+        v_email,
+        v_name,
+        extensions.crypt(v_key, extensions.gen_salt('bf')),
+        true
+    )
+    on conflict (admin_email) do update
+    set display_name = excluded.display_name,
+        access_key_hash = excluded.access_key_hash,
+        is_active = true;
+
+    return jsonb_build_object(
+        'ok', true,
+        'email', v_email,
+        'displayName', v_name,
+        'message', 'Administrador registrado correctamente.'
+    );
+end;
+$$;
+
+create or replace function public.admin_delete_user(
+    p_admin_email text,
+    p_access_key text,
+    p_target_admin_id uuid
+)
+returns jsonb
+language plpgsql
+security definer
+set search_path = public, extensions
+as $$
+declare
+    v_target_email text;
+begin
+    if not public.is_valid_admin(p_admin_email, p_access_key) then
+        return jsonb_build_object('ok', false, 'message', 'Acceso no autorizado.');
+    end if;
+
+    select lower(admin_email) into v_target_email
+    from public.admin_users
+    where id = p_target_admin_id;
+
+    if v_target_email = lower(trim(p_admin_email)) then
+        return jsonb_build_object('ok', false, 'message', 'No puedes eliminar tu propia cuenta activa.');
+    end if;
+
+    delete from public.admin_users where id = p_target_admin_id;
+    return jsonb_build_object('ok', true);
+end;
+$$;
+
 create or replace function public.admin_list_dashboard(
     p_admin_email text,
     p_access_key text
@@ -487,6 +766,7 @@ as $$
 declare
     v_students jsonb;
     v_alerts jsonb;
+    v_admins jsonb;
 begin
     if not public.is_valid_admin(p_admin_email, p_access_key) then
         return jsonb_build_object('ok', false, 'message', 'Acceso no autorizado.');
@@ -503,8 +783,10 @@ begin
             s.classroom_password as "classroomPassword",
             s.classroom_url as "classroomUrl",
             s.primary_country as "primaryCountry",
+            s.primary_ip as "primaryIp",
             s.max_devices as "maxDevices",
             s.is_active as "isActive",
+            coalesce(s.completed_class_ids, '[]'::jsonb) as "completedClassIds",
             s.created_at as "createdAt",
             (select count(*)::integer from public.student_devices d where d.student_id = s.id and d.is_authorized = true) as "authorizedDevicesCount",
             (select count(*)::integer from public.student_devices d where d.student_id = s.id) as "totalDevicesCount"
@@ -521,6 +803,7 @@ begin
             a.full_name as "fullName",
             a.detected_devices_count as "detectedDevicesCount",
             a.countries_seen as "countriesSeen",
+            coalesce(a.ips_seen, '{}'::text[]) as "ipsSeen",
             a.attempted_device_label as "attemptedDeviceLabel",
             a.attempted_ip as "attemptedIp",
             a.attempted_country as "attemptedCountry",
@@ -531,10 +814,24 @@ begin
         limit 100
     ) a_data;
 
+    select coalesce(jsonb_agg(row_to_json(adm_data) order by adm_data."createdAt" asc), '[]'::jsonb)
+    into v_admins
+    from (
+        select
+            u.id,
+            u.admin_email as "adminEmail",
+            u.display_name as "displayName",
+            u.is_active as "isActive",
+            u.created_at as "createdAt"
+        from public.admin_users u
+        where u.is_active = true
+    ) adm_data;
+
     return jsonb_build_object(
         'ok', true,
         'students', v_students,
-        'alerts', v_alerts
+        'alerts', v_alerts,
+        'admins', v_admins
     );
 end;
 $$;
@@ -557,14 +854,17 @@ set search_path = public, extensions
 as $$
 declare
     v_email text := lower(trim(coalesce(p_email, '')));
-    v_code text := upper(trim(coalesce(p_purchase_code, '')));
+    v_raw_pass text := trim(coalesce(p_classroom_password, ''));
+    v_raw_code text := trim(coalesce(p_purchase_code, ''));
+    v_effective_code text := upper(coalesce(nullif(v_raw_code, ''), v_raw_pass));
+    v_effective_pass text := coalesce(nullif(v_raw_pass, ''), v_raw_code);
 begin
     if not public.is_valid_admin(p_admin_email, p_access_key) then
         return jsonb_build_object('ok', false, 'message', 'Acceso no autorizado.');
     end if;
 
-    if v_email = '' or v_code = '' then
-        return jsonb_build_object('ok', false, 'message', 'El correo y el código único de compra son obligatorios.');
+    if v_email = '' or (v_effective_code = '' and v_effective_pass = '') then
+        return jsonb_build_object('ok', false, 'message', 'El correo y la clave de acceso asignada son obligatorios.');
     end if;
 
     insert into public.enrolled_students (
@@ -572,8 +872,8 @@ begin
     ) values (
         v_email,
         trim(coalesce(p_full_name, '')),
-        v_code,
-        coalesce(p_classroom_password, ''),
+        v_effective_code,
+        v_effective_pass,
         trim(coalesce(p_classroom_url, '')),
         greatest(1, least(5, coalesce(p_max_devices, 2))),
         coalesce(p_is_active, true)
@@ -610,6 +910,7 @@ begin
 
     update public.enrolled_students
     set primary_country = null,
+        primary_ip = null,
         updated_at = now()
     where id = p_student_id;
 
@@ -654,7 +955,10 @@ as $$
 declare
     v_item jsonb;
     v_email text;
+    v_raw_code text;
+    v_raw_pass text;
     v_code text;
+    v_pass text;
     v_imported integer := 0;
 begin
     if not public.is_valid_admin(p_admin_email, p_access_key) then
@@ -668,8 +972,11 @@ begin
     for v_item in select * from jsonb_array_elements(p_students)
     loop
         v_email := lower(trim(coalesce(v_item->>'email', '')));
-        v_code := upper(trim(coalesce(v_item->>'purchaseCode', '')));
-        if v_email = '' or v_code = '' then
+        v_raw_code := trim(coalesce(v_item->>'purchaseCode', ''));
+        v_raw_pass := trim(coalesce(v_item->>'classroomPassword', ''));
+        v_code := upper(coalesce(nullif(v_raw_code, ''), v_raw_pass));
+        v_pass := coalesce(nullif(v_raw_pass, ''), v_raw_code);
+        if v_email = '' or (v_code = '' and v_pass = '') then
             continue;
         end if;
 
@@ -679,7 +986,7 @@ begin
             v_email,
             trim(coalesce(v_item->>'fullName', '')),
             v_code,
-            coalesce(v_item->>'classroomPassword', ''),
+            v_pass,
             trim(coalesce(v_item->>'classroomUrl', '')),
             greatest(1, least(5, coalesce((v_item->>'maxDevices')::integer, 2))),
             coalesce((v_item->>'isActive')::boolean, true)
@@ -702,7 +1009,10 @@ $$;
 
 grant execute on function public.verify_student_access(text, text, text, text, text, text, text) to anon, authenticated;
 grant execute on function public.save_student_classroom_credentials(text, text, text, text) to anon, authenticated;
+grant execute on function public.save_student_progress(text, text, text, jsonb) to anon, authenticated;
 grant execute on function public.verify_admin_access(text, text) to anon, authenticated;
+grant execute on function public.admin_register_user(text, text, text, text, text) to anon, authenticated;
+grant execute on function public.admin_delete_user(text, text, uuid) to anon, authenticated;
 grant execute on function public.admin_list_dashboard(text, text) to anon, authenticated;
 grant execute on function public.admin_upsert_student(text, text, text, text, text, text, text, integer, boolean) to anon, authenticated;
 grant execute on function public.admin_upsert_students_bulk(text, text, jsonb) to anon, authenticated;

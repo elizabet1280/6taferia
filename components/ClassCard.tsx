@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from 'react';
+import React, { useMemo } from 'react';
 import type { Clase, VerifiedStudentSession } from '../types';
 import { GLOBAL_CONFIG } from '../constants';
 
@@ -30,12 +30,6 @@ function displayLocalClassTime(startTime: Date): string {
     return `${day}/${month} (${capitalizedWeekday}) - ${timeStr}`;
 }
 
-const ShareIcon = ({ className }: { className?: string }) => (
-    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" className={className}>
-        <path fillRule="evenodd" d="M15.75 4.5a3 3 0 11.825 2.066l-8.421 4.679a3.002 3.002 0 010 1.51l8.421 4.679a3 3 0 11-.729 1.31l-8.421-4.678a3 3 0 110-4.132l8.421-4.679a3 3 0 01-.096-.755z" clipRule="evenodd" />
-    </svg>
-);
-
 const CheckSquareIcon = ({ checked }: { checked: boolean }) => (
     <span
         className={`w-5 h-5 rounded flex items-center justify-center border-2 transition-colors shrink-0 ${
@@ -60,8 +54,6 @@ const ClassCard: React.FC<ClassCardProps> = ({
     isBlocked,
     onOpenClassForum,
 }) => {
-    const [copied, setCopied] = useState(false);
-
     const { isLive, isPast, statusNote } = useMemo(() => {
         if (!clase.horarioConfirmado || !clase.startTime || !clase.endTime) {
             return {
@@ -84,34 +76,6 @@ const ClassCard: React.FC<ClassCardProps> = ({
         };
     }, [clase, currentTime]);
 
-    const handleShare = async () => {
-        const text = isPast
-            ? GLOBAL_CONFIG.MENSAJE_GRABACION_DISPONIBLE(clase)
-            : clase.whatsappMessage ||
-              `¡No te pierdas "${clase.titulo}" en la 6ta Feria Latinoamérica Territorio Canva · Edición Navideña! Del 23 al 27 de noviembre de 2026. ${GLOBAL_CONFIG.URL_INSCRIPCION_CTA}`;
-
-        const shareData = {
-            title: `6ta Feria Territorio Canva: ${clase.titulo}`,
-            text,
-        };
-
-        if (navigator.share) {
-            try {
-                await navigator.share(shareData);
-            } catch (err) {
-                console.debug('Share aborted or failed', err);
-            }
-        } else {
-            try {
-                await navigator.clipboard.writeText(shareData.text);
-                setCopied(true);
-                setTimeout(() => setCopied(false), 2500);
-            } catch (err) {
-                console.error('Failed to copy to clipboard', err);
-            }
-        }
-    };
-
     return (
         <div
             className={`w-full bg-[#FFFDF7] rounded-[22px] shadow-card-warm border ${
@@ -119,7 +83,7 @@ const ClassCard: React.FC<ClassCardProps> = ({
             } p-6 md:p-8 relative overflow-hidden transition-colors duration-300 h-full flex flex-col justify-between`}
         >
             <div>
-                {/* Cabecera de la tarjeta: Edición + Check Listo + Compartir */}
+                {/* Cabecera de la tarjeta: Edición + Check Listo */}
                 <div className="flex flex-wrap items-center justify-between gap-2 mb-4">
                     <span className="text-xs uppercase tracking-[0.12em] font-bold text-[#3F6B45]">
                         {GLOBAL_CONFIG.EVENT_EDITION}
@@ -139,21 +103,6 @@ const ClassCard: React.FC<ClassCardProps> = ({
                         >
                             <CheckSquareIcon checked={isCompleted} />
                             <span>{isCompleted ? 'Clase vista ✓' : 'Marcar vista'}</span>
-                        </button>
-
-                        {copied && (
-                            <span className="text-xs text-[#3F6B45] font-bold bg-[#FBF5E6] px-2.5 py-1 rounded-full border border-[#3F6B45]/30">
-                                ¡Copiado!
-                            </span>
-                        )}
-
-                        <button
-                            onClick={handleShare}
-                            className="p-2 rounded-full bg-[#FBF5E6] hover:bg-[#A3363D] text-[#2B2B2B] hover:text-white transition-all border border-[#E5DAC0] hover:border-[#A3363D]"
-                            title="Compartir taller"
-                            aria-label="Compartir detalles del taller"
-                        >
-                            <ShareIcon className="w-5 h-5" />
                         </button>
 
                         {isLive && (
@@ -189,13 +138,6 @@ const ClassCard: React.FC<ClassCardProps> = ({
                                             alt={ponente.nombre}
                                             className="w-16 h-16 sm:w-20 sm:h-20 rounded-full object-cover object-top border-2 border-[#FFFDF7] ring-2 ring-[#A3363D] shadow-md"
                                         />
-                                        {ponente.datos.codigoPais && (
-                                            <img
-                                                src={`https://flagcdn.com/w40/${ponente.datos.codigoPais.toLowerCase()}.png`}
-                                                alt="Bandera"
-                                                className="w-5 rounded-xs border border-white shadow-xs absolute -bottom-0.5 -right-0.5"
-                                            />
-                                        )}
                                     </div>
                                     <span className="text-xs sm:text-sm font-bold text-[#2B2B2B] mt-1.5 leading-tight whitespace-nowrap">
                                         {ponente.nombre}
@@ -228,14 +170,14 @@ const ClassCard: React.FC<ClassCardProps> = ({
                         />
                         <div className="flex flex-wrap items-center gap-2 mb-1">
                             <span className="text-[11px] font-extrabold uppercase tracking-[0.12em] text-[#A3363D]">
-                                📌 Recordatorio · Recurso gratuito en ClassOnLive
+                                🎁 Recordatorio · Bonos de la clase en ClassOnLive
                             </span>
                         </div>
                         <p className="text-sm md:text-base text-[#2B2B2B] font-bold leading-snug">
                             {clase.bono}
                         </p>
                         <p className="text-xs text-[#2B2B2B]/80 mt-1">
-                            Recuerda descargarlo gratis dentro de este taller en la plataforma <strong>ClassOnLive</strong>.
+                            Recuerda descargar los bonos de la clase dentro de este taller en la plataforma <strong>ClassOnLive</strong>.
                         </p>
                     </div>
                 )}
@@ -272,13 +214,13 @@ const ClassCard: React.FC<ClassCardProps> = ({
             <div className="space-y-3">
                 {studentSession && !isBlocked ? (
                     <p className="text-center text-xs font-semibold text-[#3F6B45] tabular-nums">
-                        Pase verificado para {studentSession.email} · Datos guardados ({studentSession.activeDevicesCount}/{studentSession.maxDevices} equipos)
+                        Pase verificado para {studentSession.email} · {studentSession.activeDevicesCount}/{studentSession.maxDevices} equipos en misma IP
                     </p>
                 ) : (
                     <p className="text-center text-xs font-medium text-[#2B2B2B]/75">
                         {isBlocked
-                            ? 'Acceso restringido por seguridad hasta verificar dispositivo autorizado.'
-                            : 'Acceso exclusivo para alumnas inscritas · Valida tu correo y código de compra.'}
+                            ? 'Acceso restringido por seguridad hasta verificar dispositivo e IP autorizada.'
+                            : 'Acceso exclusivo para alumnas inscritas · Valida tu correo y tu clave de acceso.'}
                     </p>
                 )}
 
