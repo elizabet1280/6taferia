@@ -1178,3 +1178,7 @@ values (
     extensions.crypt('CAMBIA-ESTA-CLAVE-SEGURA', extensions.gen_salt('bf'))
 )
 on conflict (admin_email) do nothing;
+
+-- Recarga inmediata de caché de PostgREST para que las funciones nuevas queden disponibles al instante
+notify pgrst, 'reload schema';
+

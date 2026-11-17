@@ -4,6 +4,7 @@ import { useCurrentTime } from './hooks/useCurrentTime';
 import {
     clearStudentSessionLocally,
     getSavedStudentSession,
+    saveStudentProgress,
     verifyStudentAccess,
 } from './services/accessService';
 import type { AccessVerificationResult, VerifiedStudentSession } from './types';
@@ -13,7 +14,6 @@ import Footer from './components/Footer';
 import ClassSelector from './components/ClassSelector';
 import ClassCard from './components/ClassCard';
 import ChristmasLights from './components/ChristmasLights';
-import WhatsAppButton from './components/WhatsAppButton';
 import Confetti from './components/Confetti';
 import Snowfall from './components/Snowfall';
 import DoubtForum from './components/DoubtForum';
@@ -23,22 +23,31 @@ import PincelinIntro from './components/PincelinIntro';
 
 const COMPLETED_STORAGE_KEY = 'territorio_canva_6ta_completed_v1';
 
+const readGuestCompleted = (): string[] => {
+    try {
+        const saved = localStorage.getItem(COMPLETED_STORAGE_KEY);
+        return saved ? (JSON.parse(saved) as string[]) : [];
+    } catch {
+        return [];
+    }
+};
+
 const App: React.FC = () => {
     const [selectedClassId, setSelectedClassId] = useState<string>(classData[0].id);
     const currentTime = useCurrentTime(5000);
 
-    const [completedClassIds, setCompletedClassIds] = useState<string[]>(() => {
-        try {
-            const saved = localStorage.getItem(COMPLETED_STORAGE_KEY);
-            return saved ? JSON.parse(saved) : [];
-        } catch {
-            return [];
-        }
-    });
-
     const [studentSession, setStudentSession] = useState<VerifiedStudentSession | null>(() =>
         getSavedStudentSession()
     );
+
+    const [completedClassIds, setCompletedClassIds] = useState<string[]>(() => {
+        const savedSession = getSavedStudentSession();
+        if (savedSession && Array.isArray(savedSession.completedClassIds)) {
+            return savedSession.completedClassIds;
+        }
+        return readGuestCompleted();
+    });
+
     const [blockAlert, setBlockAlert] = useState<AccessVerificationResult | null>(null);
     const [accessModalOpen, setAccessModalOpen] = useState(false);
     const [targetClassTitle, setTargetClassTitle] = useState<string | undefined>(undefined);
@@ -47,6 +56,7 @@ const App: React.FC = () => {
     const [forumRefreshTrigger, setForumRefreshTrigger] = useState(0);
     const [programTab, setProgramTab] = useState<'talleres' | 'foro'>('talleres');
     const [forumWorkshopFilter, setForumWorkshopFilter] = useState<string>('all');
+    const [openAgendaDay, setOpenAgendaDay] = useState<string | null>(null);
     const [showIntro, setShowIntro] = useState(true);
     const [confettiBurst, setConfettiBurst] = useState<number>(0);
 
@@ -60,7 +70,7 @@ const App: React.FC = () => {
         document.getElementById('talleres-navidenos')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
     }, []);
 
-    // Revalidación silenciosa al abrir la app: comprueba IP/país y límite de 2 dispositivos
+    // Revalidación silenciosa al abrir la app: comprueba misma IP y límite de 2 dispositivos
     useEffect(() => {
         const saved = getSavedStudentSession();
         if (!saved) return;
@@ -68,12 +78,13 @@ const App: React.FC = () => {
         let active = true;
         verifyStudentAccess({
             email: saved.email,
-            purchaseCode: saved.purchaseCode,
+            purchaseCode: saved.classroomPassword || saved.purchaseCode,
         })
             .then((res) => {
                 if (!active) return;
                 if (res.ok && res.student) {
                     setStudentSession(res.student);
+                    setCompletedClassIds(res.student.completedClassIds || []);
                     setBlockAlert(null);
                 } else if (res.status === 'BLOCKED_MAX_DEVICES' || res.status === 'BLOCKED_GEO') {
                     clearStudentSessionLocally();
@@ -94,8 +105,10 @@ const App: React.FC = () => {
     }, []);
 
     useEffect(() => {
-        localStorage.setItem(COMPLETED_STORAGE_KEY, JSON.stringify(completedClassIds));
-    }, [completedClassIds]);
+        if (!studentSession) {
+            localStorage.setItem(COMPLETED_STORAGE_KEY, JSON.stringify(completedClassIds));
+        }
+    }, [completedClassIds, studentSession]);
 
     useEffect(() => {
         if (confettiBurst === 0) return;
@@ -114,10 +127,20 @@ const App: React.FC = () => {
 
     const toggleCompleteClass = (classId: string) => {
         const isMarkingComplete = !completedClassIds.includes(classId);
+        const nextIds = isMarkingComplete
+            ? [...completedClassIds, classId]
+            : completedClassIds.filter((id) => id !== classId);
 
-        setCompletedClassIds((prev) =>
-            prev.includes(classId) ? prev.filter((id) => id !== classId) : [...prev, classId]
-        );
+        setCompletedClassIds(nextIds);
+
+        if (studentSession) {
+            setStudentSession((prev) => (prev ? { ...prev, completedClassIds: nextIds } : prev));
+            void saveStudentProgress({
+                email: studentSession.email,
+                purchaseCode: studentSession.classroomPassword || studentSession.purchaseCode,
+                completedClassIds: nextIds,
+            });
+        }
 
         if (isMarkingComplete) {
             setConfettiBurst((prev) => prev + 1);
@@ -131,10 +154,9 @@ const App: React.FC = () => {
         setTargetClassTitle(clase.titulo);
 
         if (studentSession) {
-            // Verifica que siga dentro del límite de 2 dispositivos y mismo país antes de abrir
             const freshCheck = await verifyStudentAccess({
                 email: studentSession.email,
-                purchaseCode: studentSession.purchaseCode,
+                purchaseCode: studentSession.classroomPassword || studentSession.purchaseCode,
             }).catch(() => null);
 
             if (freshCheck && (freshCheck.status === 'BLOCKED_MAX_DEVICES' || freshCheck.status === 'BLOCKED_GEO')) {
@@ -147,6 +169,7 @@ const App: React.FC = () => {
 
             if (freshCheck?.ok && freshCheck.student) {
                 setStudentSession(freshCheck.student);
+                setCompletedClassIds(freshCheck.student.completedClassIds || []);
             }
         }
 
@@ -160,6 +183,7 @@ const App: React.FC = () => {
 
     const handleStudentVerified = (session: VerifiedStudentSession) => {
         setStudentSession(session);
+        setCompletedClassIds(session.completedClassIds || []);
         setBlockAlert(null);
     };
 
@@ -172,6 +196,7 @@ const App: React.FC = () => {
     const handleStudentLogout = () => {
         clearStudentSessionLocally();
         setStudentSession(null);
+        setCompletedClassIds(readGuestCompleted());
         setBlockAlert(null);
     };
 
@@ -215,38 +240,52 @@ const App: React.FC = () => {
                                 </h2>
                             </div>
 
-                            <div
-                                role="tablist"
-                                aria-label="Cambiar entre Talleres y Foro de Dudas"
-                                className="inline-flex p-1.5 rounded-full bg-[#243E29] border border-[#CFE5D2]/30 shadow-md self-start md:self-auto"
-                            >
+                            <div className="flex flex-wrap items-center gap-2 self-start md:self-auto">
+                                <div
+                                    role="tablist"
+                                    aria-label="Cambiar entre Talleres y Foro de Dudas"
+                                    className="inline-flex p-1.5 rounded-full bg-[#243E29] border border-[#CFE5D2]/30 shadow-md"
+                                >
+                                    <button
+                                        type="button"
+                                        role="tab"
+                                        aria-selected={programTab === 'talleres'}
+                                        onClick={() => setProgramTab('talleres')}
+                                        className={`px-5 py-2.5 rounded-full text-xs sm:text-sm font-bold transition-all flex items-center gap-2 ${
+                                            programTab === 'talleres'
+                                                ? 'bg-[#FFFDF7] text-[#A3363D] shadow-sm'
+                                                : 'text-[#FFE9B8] hover:text-white'
+                                        }`}
+                                    >
+                                        <span>🎨</span>
+                                        <span>Talleres</span>
+                                    </button>
+                                    <button
+                                        type="button"
+                                        role="tab"
+                                        aria-selected={programTab === 'foro'}
+                                        onClick={() => setProgramTab('foro')}
+                                        className={`px-5 py-2.5 rounded-full text-xs sm:text-sm font-bold transition-all flex items-center gap-2 ${
+                                            programTab === 'foro'
+                                                ? 'bg-[#FFFDF7] text-[#3F6B45] shadow-sm'
+                                                : 'text-[#FFE9B8] hover:text-white'
+                                        }`}
+                                    >
+                                        <span>💬</span>
+                                        <span>Foro de Dudas</span>
+                                    </button>
+                                </div>
+
                                 <button
                                     type="button"
-                                    role="tab"
-                                    aria-selected={programTab === 'talleres'}
-                                    onClick={() => setProgramTab('talleres')}
-                                    className={`px-5 py-2.5 rounded-full text-xs sm:text-sm font-bold transition-all flex items-center gap-2 ${
-                                        programTab === 'talleres'
-                                            ? 'bg-[#FFFDF7] text-[#A3363D] shadow-sm'
-                                            : 'text-[#FFE9B8] hover:text-white'
-                                    }`}
+                                    onClick={() =>
+                                        document
+                                            .getElementById('agenda-por-dia')
+                                            ?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+                                    }
+                                    className="px-4 py-2.5 rounded-full bg-[#243E29] border border-[#FFE9B8]/40 text-[#FFE9B8] hover:bg-[#3F6B45] hover:text-white text-xs font-bold shadow-sm transition-colors"
                                 >
-                                    <span>🎨</span>
-                                    <span>Talleres</span>
-                                </button>
-                                <button
-                                    type="button"
-                                    role="tab"
-                                    aria-selected={programTab === 'foro'}
-                                    onClick={() => setProgramTab('foro')}
-                                    className={`px-5 py-2.5 rounded-full text-xs sm:text-sm font-bold transition-all flex items-center gap-2 ${
-                                        programTab === 'foro'
-                                            ? 'bg-[#FFFDF7] text-[#3F6B45] shadow-sm'
-                                            : 'text-[#FFE9B8] hover:text-white'
-                                    }`}
-                                >
-                                    <span>💬</span>
-                                    <span>Foro de Dudas</span>
+                                    📁 Agenda por día
                                 </button>
                             </div>
                         </div>
@@ -292,8 +331,11 @@ const App: React.FC = () => {
                         )}
                     </section>
 
-                    {/* Referencia rápida por días: clases, horarios y colaboradores */}
-                    <section className="max-w-6xl mx-auto bg-[#FFFDF7] border border-[#E5DAC0] rounded-[22px] shadow-card-warm p-6 md:p-8">
+                    {/* Referencia rápida por días: carpetas interactivas con pestaña y colores alternados rojo/verde */}
+                    <section
+                        id="agenda-por-dia"
+                        className="max-w-6xl mx-auto bg-[#FFFDF7] border border-[#E5DAC0] rounded-[22px] shadow-card-warm p-4 sm:p-6 md:p-8 scroll-mt-16"
+                    >
                         <div className="flex flex-col sm:flex-row sm:items-end justify-between gap-2 mb-6">
                             <div>
                                 <p className="text-xs font-semibold uppercase tracking-[0.14em] text-[#3F6B45] mb-1">
@@ -304,69 +346,164 @@ const App: React.FC = () => {
                                 </h2>
                             </div>
                             <p className="text-xs md:text-sm text-[#2B2B2B]/75">
-                                Horarios expresados en hora de Venezuela (VET) · Toca una clase para abrirla
+                                Toca la pestaña de cada día para desplegar sus clases (Hora Venezuela · VET)
                             </p>
                         </div>
 
-                        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3.5">
+                        <div className="space-y-4">
                             {EVENT_DAYS.map((day, dayIndex) => {
                                 const dayClasses = classData.filter((c) =>
                                     c.date.toLowerCase().includes(day.diaSemana.toLowerCase())
                                 );
+                                const isRed = dayIndex % 2 === 0;
+                                const isOpen = openAgendaDay === day.numero;
+
+                                const tabBgClass = isRed ? 'bg-[#A3363D]' : 'bg-[#3F6B45]';
+                                const borderClass = isRed ? 'border-[#A3363D]' : 'border-[#3F6B45]';
+                                const bodyTintClass = isRed
+                                    ? 'bg-[#A3363D]/5 hover:bg-[#A3363D]/10'
+                                    : 'bg-[#3F6B45]/5 hover:bg-[#3F6B45]/10';
+                                const accentTextClass = isRed ? 'text-[#A3363D]' : 'text-[#3F6B45]';
+                                const badgeBgClass = isRed
+                                    ? 'bg-[#A3363D]/15 text-[#A3363D]'
+                                    : 'bg-[#3F6B45]/15 text-[#2E4F35]';
+
+                                const toggleFolder = () =>
+                                    setOpenAgendaDay((prev) => (prev === day.numero ? null : day.numero));
 
                                 return (
-                                    <div
-                                        key={day.numero}
-                                        className="rounded-2xl bg-[#FBF5E6] border border-[#E5DAC0] p-3.5 flex flex-col gap-2.5"
-                                    >
-                                        <div className="flex items-baseline justify-between border-b border-[#E5DAC0] pb-2">
-                                            <span className="font-bold text-xs uppercase tracking-wider text-[#2E4F35]">
-                                                {day.diaSemana}
+                                    <div key={day.numero} className="group">
+                                        {/* Pestaña superior de la carpeta */}
+                                        <button
+                                            type="button"
+                                            onClick={toggleFolder}
+                                            aria-expanded={isOpen}
+                                            className={`inline-flex items-center gap-2 px-4 py-2 rounded-t-2xl text-white font-bold text-xs sm:text-sm tracking-wide shadow-xs transition-opacity hover:opacity-95 ${tabBgClass}`}
+                                        >
+                                            <svg
+                                                viewBox="0 0 20 20"
+                                                fill="currentColor"
+                                                aria-hidden="true"
+                                                className="w-4 h-4 text-[#FFE9B8]"
+                                            >
+                                                <path d="M3.75 3A1.75 1.75 0 002 4.75v10.5c0 .966.784 1.75 1.75 1.75h12.5A1.75 1.75 0 0018 15.25v-8.5A1.75 1.75 0 0016.25 5h-4.836a.25.25 0 01-.177-.073L9.823 3.513A1.75 1.75 0 008.586 3H3.75z" />
+                                            </svg>
+                                            <span>
+                                                {day.diaSemana} {day.numero} de nov
                                             </span>
-                                            <span className="font-title text-lg font-bold text-[#A3363D] tabular-nums">
-                                                {day.numero} Nov
-                                            </span>
-                                        </div>
+                                            <svg
+                                                viewBox="0 0 20 20"
+                                                fill="currentColor"
+                                                aria-hidden="true"
+                                                className={`w-4 h-4 text-[#FFE9B8] transition-transform duration-200 ${
+                                                    isOpen ? 'rotate-180' : ''
+                                                }`}
+                                            >
+                                                <path
+                                                    fillRule="evenodd"
+                                                    d="M5.23 7.21a.75.75 0 011.06.02L10 11.168l3.71-3.938a.75.75 0 111.08 1.04l-4.25 4.5a.75.75 0 01-1.08 0l-4.25-4.5a.75.75 0 01.02-1.06z"
+                                                    clipRule="evenodd"
+                                                />
+                                            </svg>
+                                        </button>
 
-                                        <div className="space-y-2 flex-1">
-                                            {dayClasses.map((clase) => {
-                                                const isActive = clase.id === selectedClassId;
-                                                return (
-                                                    <button
-                                                        key={clase.id}
-                                                        type="button"
-                                                        onClick={() => {
-                                                            setSelectedClassId(clase.id);
-                                                            setProgramTab('talleres');
-                                                            document
-                                                                .getElementById('talleres-navidenos')
-                                                                ?.scrollIntoView({ behavior: 'smooth', block: 'start' });
-                                                        }}
-                                                        className={`w-full text-left rounded-xl p-2.5 border transition-colors ${
-                                                            isActive
-                                                                ? 'bg-[#FFFDF7] border-[#A3363D] ring-1 ring-[#A3363D]/30'
-                                                                : 'bg-[#FFFDF7] border-[#E5DAC0] hover:border-[#3F6B45]'
+                                        {/* Cuerpo de la carpeta */}
+                                        <div
+                                            className={`border-2 rounded-b-2xl rounded-tr-2xl overflow-hidden transition-shadow ${borderClass} ${
+                                                isOpen ? 'shadow-md' : 'shadow-xs'
+                                            }`}
+                                        >
+                                            <button
+                                                type="button"
+                                                onClick={toggleFolder}
+                                                aria-expanded={isOpen}
+                                                aria-label={`${day.diaSemana} ${day.numero} de nov`}
+                                                className={`w-full px-4 py-3 flex flex-wrap items-center justify-between gap-2 text-left transition-colors ${bodyTintClass}`}
+                                            >
+                                                <div className="flex flex-wrap items-center gap-2 text-xs sm:text-sm">
+                                                    <span className={`font-bold ${accentTextClass}`}>
+                                                        {dayClasses.length}{' '}
+                                                        {dayClasses.length === 1 ? 'taller de cierre' : 'talleres programados'}
+                                                    </span>
+                                                    <span className="text-[#2B2B2B]/65">· {day.estadoHorario}</span>
+                                                </div>
+
+                                                <span
+                                                    aria-hidden="true"
+                                                    className={`w-7 h-7 rounded-full inline-flex items-center justify-center ${badgeBgClass}`}
+                                                >
+                                                    <svg
+                                                        viewBox="0 0 20 20"
+                                                        fill="currentColor"
+                                                        className={`w-4 h-4 transition-transform duration-200 ${
+                                                            isOpen ? 'rotate-180' : ''
                                                         }`}
                                                     >
-                                                        <span className="inline-block text-[10px] font-extrabold uppercase tracking-wider text-[#3F6B45]">
-                                                            {clase.time}
-                                                        </span>
-                                                        <p className="text-xs font-bold text-[#2B2B2B] leading-snug mt-0.5">
-                                                            {clase.titulo.replace(/^Taller \d+:\s*/i, '')}
-                                                        </p>
-                                                        <p className="text-[11px] text-[#A3363D] font-semibold mt-1">
-                                                            {clase.ponentes.map((p) => p.nombre).join(', ')}
-                                                        </p>
-                                                    </button>
-                                                );
-                                            })}
-                                        </div>
+                                                        <path
+                                                            fillRule="evenodd"
+                                                            d="M5.23 7.21a.75.75 0 011.06.02L10 11.168l3.71-3.938a.75.75 0 111.08 1.04l-4.25 4.5a.75.75 0 01-1.08 0l-4.25-4.5a.75.75 0 01.02-1.06z"
+                                                            clipRule="evenodd"
+                                                        />
+                                                    </svg>
+                                                </span>
+                                            </button>
 
-                                        {dayIndex === 4 && (
-                                            <p className="text-[10px] font-semibold uppercase tracking-wider text-[#3F6B45] text-center pt-1">
-                                                Cierre de la feria
-                                            </p>
-                                        )}
+                                            {/* Hojas interiores desplegables con las clases del día */}
+                                            {isOpen && (
+                                                <div
+                                                    className={`p-4 bg-[#FFFDF7] border-t ${borderClass}/25 grid grid-cols-1 ${
+                                                        dayClasses.length > 1 ? 'md:grid-cols-2' : ''
+                                                    } gap-3`}
+                                                >
+                                                    {dayClasses.map((clase) => {
+                                                        const isActive = clase.id === selectedClassId;
+                                                        return (
+                                                            <button
+                                                                key={clase.id}
+                                                                type="button"
+                                                                onClick={() => {
+                                                                    setSelectedClassId(clase.id);
+                                                                    setProgramTab('talleres');
+                                                                    document
+                                                                        .getElementById('talleres-navidenos')
+                                                                        ?.scrollIntoView({
+                                                                            behavior: 'smooth',
+                                                                            block: 'start',
+                                                                        });
+                                                                }}
+                                                                className={`w-full text-left rounded-xl p-3.5 border transition-all flex items-start justify-between gap-3 ${
+                                                                    isActive
+                                                                        ? `bg-[#FBF5E6] ${borderClass} ring-1 ${
+                                                                              isRed ? 'ring-[#A3363D]/30' : 'ring-[#3F6B45]/30'
+                                                                          }`
+                                                                        : 'bg-[#FBF5E6]/70 border-[#E5DAC0] hover:bg-[#FBF5E6] hover:border-[#2B2B2B]/30'
+                                                                }`}
+                                                            >
+                                                                <div className="min-w-0 flex-1">
+                                                                    <span
+                                                                        className={`inline-block text-[11px] font-extrabold uppercase tracking-wider px-2.5 py-0.5 rounded-full mb-1.5 ${badgeBgClass}`}
+                                                                    >
+                                                                        {clase.time} (VET)
+                                                                    </span>
+                                                                    <p className="text-sm font-bold text-[#2B2B2B] leading-snug">
+                                                                        {clase.titulo.replace(/^Taller \d+:\s*/i, '')}
+                                                                    </p>
+                                                                    <p className={`text-xs font-semibold mt-1 ${accentTextClass}`}>
+                                                                        Con {clase.ponentes.map((p) => p.nombre).join(', ')}
+                                                                    </p>
+                                                                </div>
+                                                                <span
+                                                                    aria-hidden="true"
+                                                                    className={`text-xs font-bold shrink-0 self-center ${accentTextClass}`}
+                                                                >
+                                                                    Ver →
+                                                                </span>
+                                                            </button>
+                                                        );
+                                                    })}
+                                                </div>
+                                            )}
+                                        </div>
                                     </div>
                                 );
                             })}
@@ -427,8 +564,6 @@ const App: React.FC = () => {
                 initialTab={adminInitialTab}
                 onForumUpdated={() => setForumRefreshTrigger((prev) => prev + 1)}
             />
-
-            <WhatsAppButton />
         </div>
     );
 };

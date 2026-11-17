@@ -1,3 +1,4 @@
+import fs from 'fs';
 import path from 'path';
 import { defineConfig, type Plugin } from 'vite';
 import react from '@vitejs/plugin-react';
@@ -8,7 +9,33 @@ function localApiDevPlugin(): Plugin {
         name: 'local-api-dev-middleware',
         configureServer(server) {
             server.middlewares.use(async (req, res, next) => {
-                if (req.url !== '/api/verify-access' && req.url !== '/api/admin') {
+                const parsedUrl = new URL(req.url || '/', 'http://localhost');
+                const reqPath = parsedUrl.pathname;
+
+
+
+                if (reqPath === '/api/client-ip' && req.method === 'GET') {
+                    const forwarded = req.headers['x-forwarded-for'];
+                    const rawIp =
+                        (Array.isArray(forwarded) ? forwarded[0] : forwarded || '')
+                            .split(',')[0]
+                            ?.trim() ||
+                        (Array.isArray(req.headers['x-real-ip'])
+                            ? req.headers['x-real-ip'][0]
+                            : req.headers['x-real-ip'] || '')
+                            .toString()
+                            .trim() ||
+                        req.socket?.remoteAddress ||
+                        '127.0.0.1';
+                    const cleanIp = rawIp.replace(/^::ffff:/, '').replace(/^::1$/, '127.0.0.1');
+                    res.statusCode = 200;
+                    res.setHeader('Content-Type', 'application/json; charset=utf-8');
+                    res.setHeader('Cache-Control', 'no-store');
+                    res.end(JSON.stringify({ ip: cleanIp || '127.0.0.1' }));
+                    return;
+                }
+
+                if (reqPath !== '/api/verify-access' && reqPath !== '/api/admin') {
                     return next();
                 }
 
@@ -20,7 +47,7 @@ function localApiDevPlugin(): Plugin {
                         const parsedBody = rawBody ? JSON.parse(rawBody) : {};
 
                         const modulePath =
-                            req.url === '/api/verify-access'
+                            reqPath === '/api/verify-access'
                                 ? path.resolve(__dirname, 'api/verify-access.ts')
                                 : path.resolve(__dirname, 'api/admin.ts');
 
@@ -110,6 +137,10 @@ export default defineConfig(() => {
                     ],
                 },
                 workbox: {
+                    cleanupOutdatedCaches: true,
+                    skipWaiting: true,
+                    clientsClaim: true,
+                    maximumFileSizeToCacheInBytes: 5 * 1024 * 1024,
                     globPatterns: ['**/*.{js,css,html,ico,png,svg,woff,woff2}'],
                     navigateFallbackDenylist: [/^\/api\//],
                     runtimeCaching: [

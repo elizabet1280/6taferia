@@ -96,7 +96,6 @@ const classDataRaw: RawClase[] = [
             datos: {
                 usuario: '@elprofeyussef',
                 instagram: 'https://www.instagram.com/elprofeyussef?utm_source=ig_web_button_share_sheet&igsh=ZDNlZDc0MzIxNw==',
-                codigoPais: 'VE',
             },
         }],
         botonAcceso: { habilitado: true, texto: 'Entrar a la clase', animacion: '' },
@@ -116,7 +115,6 @@ const classDataRaw: RawClase[] = [
             nombre: 'Zully Martínez',
             foto: 'https://6taferialatinoamericaterritoriocanv.vercel.app/img/zully.jpg',
             datos: {
-                codigoPais: 'VE',
             },
         }],
         botonAcceso: { habilitado: true, texto: 'Entrar a la clase', animacion: '' },
@@ -138,7 +136,6 @@ const classDataRaw: RawClase[] = [
             datos: {
                 usuario: '@gabylinares.ds',
                 instagram: 'https://www.instagram.com/gabylinares.ds?utm_source=ig_web_button_share_sheet&igsh=ZDNlZDc0MzIxNw==',
-                codigoPais: 'VE',
             },
         }],
         botonAcceso: { habilitado: true, texto: 'Entrar a la clase', animacion: '' },
@@ -160,7 +157,6 @@ const classDataRaw: RawClase[] = [
             datos: {
                 usuario: '@sabrinacreadigital',
                 instagram: 'https://www.instagram.com/sabrinacreadigital?igsh=ZXdzcnZ4eDg0OG1m',
-                codigoPais: 'VE',
             },
         }],
         botonAcceso: { habilitado: true, texto: 'Entrar a la clase', animacion: '' },
@@ -180,7 +176,6 @@ const classDataRaw: RawClase[] = [
             nombre: 'Adriana Rosenthal',
             foto: 'https://6taferialatinoamericaterritoriocanv.vercel.app/img/adriana.jpg',
             datos: {
-                codigoPais: 'VE',
             },
         }],
         botonAcceso: { habilitado: true, texto: 'Entrar a la clase', animacion: '' },
@@ -200,7 +195,6 @@ const classDataRaw: RawClase[] = [
             nombre: 'Wendy Valverde',
             foto: 'https://6taferialatinoamericaterritoriocanv.vercel.app/img/wendy.jpg',
             datos: {
-                codigoPais: 'CR',
             },
         }],
         botonAcceso: { habilitado: true, texto: 'Entrar a la clase', animacion: '' },
@@ -222,7 +216,6 @@ const classDataRaw: RawClase[] = [
             datos: {
                 usuario: '@careliz.cabrera',
                 instagram: 'https://www.instagram.com/careliz.cabrera?igsh=MXM5NGR2M3pwb3hqaw==',
-                codigoPais: 'VE',
             },
         }],
         botonAcceso: { habilitado: true, texto: 'Entrar a la clase', animacion: '' },
@@ -244,7 +237,6 @@ const classDataRaw: RawClase[] = [
             datos: {
                 usuario: '@elprofeyussef',
                 instagram: 'https://www.instagram.com/elprofeyussef?utm_source=ig_web_button_share_sheet&igsh=ZDNlZDc0MzIxNw==',
-                codigoPais: 'VE',
             },
         }],
         botonAcceso: { habilitado: true, texto: 'Entrar a la clase', animacion: '' },
@@ -266,7 +258,6 @@ const classDataRaw: RawClase[] = [
             datos: {
                 usuario: '@emprendemosdigital',
                 instagram: 'https://www.instagram.com/emprendemosdigital?utm_source=ig_web_button_share_sheet&igsh=ZDNlZDc0MzIxNw==',
-                codigoPais: 'VE',
             },
         }],
         botonAcceso: { habilitado: true, texto: 'Entrar a la clase', animacion: '' },

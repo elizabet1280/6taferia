@@ -9,9 +9,9 @@ Aplicación web progresiva (PWA) interactiva para las alumnas e invitados de la 
   - Programa completo de 9 talleres con fecha, hora de Venezuela (VET) y conversión automática a la hora local de cada alumna.
   - Búsqueda inteligente por palabras clave y seguimiento individual de progreso (*Feria* vs *Mi progreso*).
   - Foro público de dudas filtrable por clase y estado, con respuestas oficiales de los profesores y comentarios en hilo.
-- **Control de acceso anti-compartición**:
-  - Validación por correo electrónico + código único de compra (máximo 2 dispositivos del mismo país).
-  - Portal Administrativo para importar listados en `.xlsx`, `.xls` o `.csv`, gestionar estudiantes, revisar alertas de seguridad y responder dudas pendientes.
+- **Control de acceso anti-compartición y progreso**:
+  - Validación por correo electrónico (usuario) + clave asignada al comprar (máximo 2 dispositivos conectados desde la misma IP) y guardado de clases vistas en el perfil del usuario.
+  - Portal Administrativo con registro e inicio de sesión de administradores, importación de listados en `.xlsx`, `.xls` o `.csv`, gestión de estudiantes, alertas de seguridad (IP distinta o >2 equipos) y respuestas oficiales en el foro.
 - **PWA instalable**: Configurada con `vite-plugin-pwa` para instalarse en Android, iOS y escritorio.
 
 ## Requisitos previos

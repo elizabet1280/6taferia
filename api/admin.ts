@@ -171,11 +171,28 @@ export default async function handler(req: ApiRequest, res: ApiResponse) {
             body: JSON.stringify(rpcPayload),
         });
 
-        const data = await rpcRes.json();
+        const data = (await rpcRes.json()) as { message?: string; code?: string; details?: string };
         if (!rpcRes.ok) {
+            const rawMessage = String(data?.message || '');
+            const isMissingSchemaFn =
+                data?.code === 'PGRST202' ||
+                rawMessage.includes('schema cache') ||
+                rawMessage.includes('Could not find the function') ||
+                rawMessage.includes('does not exist');
+
+            if (isMissingSchemaFn) {
+                res.status(rpcRes.status).json({
+                    ok: false,
+                    needsSchemaUpdate: true,
+                    message:
+                        'Tu base de datos en Supabase aún tiene una versión anterior (faltan funciones nuevas como registro de administradores).\n\nSolución rápida:\n1. Abre tu proyecto en Supabase → SQL Editor → New query.\n2. Copia y pega el contenido completo del archivo "supabase/schema.sql" de tu proyecto actualizado y presiona Run.\n3. Vuelve aquí e intenta nuevamente.',
+                });
+                return;
+            }
+
             res.status(rpcRes.status).json({
                 ok: false,
-                message: (data as { message?: string })?.message || 'Error al ejecutar operación de administrador.',
+                message: rawMessage || 'Error al ejecutar operación de administrador.',
             });
             return;
         }

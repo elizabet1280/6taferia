@@ -603,7 +603,7 @@ const AdminPortalModal: React.FC<AdminPortalModalProps> = ({
                                 </label>
 
                                 {authError && (
-                                    <p className="text-xs font-semibold text-[#A3363D] bg-[#A3363D]/10 p-3 rounded-xl border border-[#A3363D]/30" role="alert">
+                                    <p className="text-xs font-semibold text-[#A3363D] bg-[#A3363D]/10 p-3.5 rounded-xl border border-[#A3363D]/30 whitespace-pre-line leading-relaxed" role="alert">
                                         {authError}
                                     </p>
                                 )}
@@ -738,7 +738,7 @@ const AdminPortalModal: React.FC<AdminPortalModalProps> = ({
                                 </label>
 
                                 {authError && (
-                                    <p className="text-xs font-semibold text-[#A3363D] bg-[#A3363D]/10 p-3 rounded-xl border border-[#A3363D]/30" role="alert">
+                                    <p className="text-xs font-semibold text-[#A3363D] bg-[#A3363D]/10 p-3.5 rounded-xl border border-[#A3363D]/30 whitespace-pre-line leading-relaxed" role="alert">
                                         {authError}
                                     </p>
                                 )}

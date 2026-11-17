@@ -2,7 +2,6 @@ export interface PonenteDatos {
     usuario?: string;
     instagram?: string;
     pais?: string;
-    codigoPais?: string;
 }
 
 export interface Ponente {
@@ -56,8 +55,10 @@ export interface VerifiedStudentSession {
     classroomPassword: string;
     classroomUrl: string;
     primaryCountry: string;
+    primaryIp: string;
     activeDevicesCount: number;
     maxDevices: number;
+    completedClassIds: string[];
     verifiedAt: string;
 }
 
@@ -65,13 +66,16 @@ export interface AccessVerificationResult {
     ok: boolean;
     status: StudentAccessStatus;
     message: string;
+    reason?: 'MAX_DEVICES' | 'IP_MISMATCH' | 'COUNTRY_MISMATCH';
     student?: VerifiedStudentSession;
     detectedDevicesCount?: number;
     maxDevices?: number;
     primaryCountry?: string;
     attemptedCountry?: string;
     countriesSeen?: string[];
+    primaryIp?: string;
     attemptedIp?: string;
+    ipsSeen?: string[];
 }
 
 export interface AdminStudentRecord {
@@ -82,8 +86,10 @@ export interface AdminStudentRecord {
     classroomPassword: string;
     classroomUrl: string;
     primaryCountry: string | null;
+    primaryIp: string | null;
     maxDevices: number;
     isActive: boolean;
+    completedClassIds: string[];
     authorizedDevicesCount: number;
     totalDevicesCount: number;
     createdAt: string;
@@ -96,11 +102,20 @@ export interface DeviceAccessAlert {
     fullName: string;
     detectedDevicesCount: number;
     countriesSeen: string[];
+    ipsSeen?: string[];
     attemptedDeviceLabel: string;
     attemptedIp: string;
     attemptedCountry: string;
-    reason: 'MAX_DEVICES' | 'COUNTRY_MISMATCH';
+    reason: 'MAX_DEVICES' | 'IP_MISMATCH' | 'COUNTRY_MISMATCH';
     resolved: boolean;
+    createdAt: string;
+}
+
+export interface AdminUserSummary {
+    id: string;
+    adminEmail: string;
+    displayName: string;
+    isActive: boolean;
     createdAt: string;
 }
 

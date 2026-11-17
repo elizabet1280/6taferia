@@ -169,11 +169,28 @@ export default async function handler(req: ApiRequest, res: ApiResponse) {
             body: JSON.stringify(rpcPayload),
         });
 
-        const data = await rpcRes.json();
+        const data = (await rpcRes.json()) as { message?: string; code?: string };
         if (!rpcRes.ok) {
+            const rawMessage = String(data?.message || '');
+            const isMissingSchemaFn =
+                data?.code === 'PGRST202' ||
+                rawMessage.includes('schema cache') ||
+                rawMessage.includes('Could not find the function') ||
+                rawMessage.includes('does not exist');
+
+            if (isMissingSchemaFn) {
+                res.status(rpcRes.status).json({
+                    ok: false,
+                    needsSchemaUpdate: true,
+                    message:
+                        'Falta actualizar el archivo "supabase/schema.sql" en el SQL Editor de Supabase para habilitar esta función.',
+                });
+                return;
+            }
+
             res.status(rpcRes.status).json({
                 ok: false,
-                message: (data as { message?: string })?.message || 'Error al validar en Supabase.',
+                message: rawMessage || 'Error al validar en Supabase.',
             });
             return;
         }
